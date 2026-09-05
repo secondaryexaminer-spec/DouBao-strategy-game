@@ -6,7 +6,8 @@
 - 纯前端回合制策略游戏 v0.1.2；`src/main.js`（165KB 单文件，重构中）含逻辑；esbuild 打包为 `js/game.js`（IIFE，file:// 可开）。
 - 无头模拟：`sim/harness.js`（DOM shim）+ `sim/run.js`（批量对局）+ `sim/suite.js`（4 场景平衡回归）。AI 逻辑与浏览器共用同一打包产物，零分叉。
 - git：仓库在 `E:\WorkPlace\DouBao-WorkPlace\strategy-game`（外层），远程已改为 `https://github.com/secondaryexaminer-spec/DouBao-strategy-game.git`。
-- 重构进度：第一阶段已抽取 `src/core/mapgen.js`（地图生成纯逻辑，W/H 参数化）；行为等价已用同种子模拟验证。
+- 重构进度：第一阶段抽取中——已抽 `src/core/mapgen.js`（地图生成）、`src/core/teams.js`（阵营判定）、`src/core/combat.js`（战斗计算，game 显式传入）；每次抽取均用同种子模拟验证行为等价。main.js 现约 158KB。
+- 待抽：`rng.js`（确定性随机，模拟器升级关键）、`combat 副作用`（attack/removeUnit）、`movement.js`、`turn.js`。
 
 ## 已知问题清单（待处理）
 1. **推送未完成**：本地已提交（`32d3d20` 等 3 个提交），但 2026-09-05 推送时 github.com:443 连不通（无代理、TCP 失败）。网络恢复后 `git push origin main` 即可。
@@ -14,6 +15,7 @@
 3. **`src/sim/` 空目录**：无内容，疑似遗留，可清理或忽略。
 
 ## 踩坑与根因（按时间倒序）
+- **2026-09-05 · 抽取边界事故**：重构删除段用字符串锚点（`siteBonus` 定义 → `attack` 定义）定位，未核实区间内是否含其他函数，误删了有副作用的 `removeUnit`，导致 sim 报 `removeUnit is not defined`。教训：**切段删除前先列出区间内全部函数清单，副作用函数（改状态/日志/统计）一律留在 main.js**；错误信息直接指认根因（黑箱协议第 4 步）。
 - **2026-09-05 · 编码事故**：用 PowerShell `Get-Content -Raw` + `Set-Content -Encoding utf8` 改 main.js，导致全部中文变乱码（PS 5.1 默认按 ANSI/GBK 读取 UTF-8 文件）。根因链：PS 读取编码错误 → 乱码 → esbuild 报 Unterminated regular expression。**教训：改含中文的 JS 文件禁止用 PowerShell 文本管道，一律用 Node 脚本或 Read/Edit 工具；git restore 可回滚。**
 - 2026-09-05 · 构建产物"过期"实为注释级差异：main.js 最后 6 分钟改动未改变 esbuild 输出内容（legalComments:none），但时间戳失联导致无法证明同步，重建后消除不确定性。
 

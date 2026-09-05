@@ -346,6 +346,81 @@
     return terrain;
   }
 
+  // src/core/teams.js
+  function teamOf(teams, owner) {
+    return teams && teams[owner] || "A";
+  }
+  function areAllies(teams, a, b) {
+    if (!a || !b) {
+      return false;
+    }
+    if (a === b) {
+      return true;
+    }
+    if (a === "neutral" || b === "neutral") {
+      return false;
+    }
+    return teamOf(teams, a) === teamOf(teams, b);
+  }
+  function areEnemies(teams, a, b) {
+    return !!a && !!b && a !== "neutral" && b !== "neutral" && !areAllies(teams, a, b);
+  }
+
+  // src/core/combat.js
+  function getSite(game, x, y) {
+    return game.sites.find((entry) => entry.x === x && entry.y === y) || null;
+  }
+  function siteBonus(game, siteEntry, unitEntry, mode) {
+    if (!siteEntry || !areAllies(game.teams, siteEntry.owner, unitEntry.owner)) {
+      return 0;
+    }
+    const domain = typeMeta(unitEntry.type).domain;
+    if ((siteEntry.kind === "city" || siteEntry.kind === "camp" || siteEntry.kind === "barracksSmall" || siteEntry.kind === "barracksLarge") && domain === "land") {
+      const supportTier = siteMeta(siteEntry.kind).supportTier || siteEntry.tier;
+      return mode === "attack" ? supportTier : supportTier * 2;
+    }
+    if (siteEntry.kind === "shipyard" && domain === "sea") {
+      return mode === "attack" ? siteEntry.tier : siteEntry.tier + 1;
+    }
+    if (siteEntry.kind === "fortress" && domain === "sea") {
+      return mode === "attack" ? 1 : 3;
+    }
+    return 0;
+  }
+  function matchupBonus(attacker, defender) {
+    const bonusVs = typeMeta(attacker.type).bonusVs || {};
+    return bonusVs[defender.type] || 0;
+  }
+  function computeDamage(game, attacker, defender, fromCell, toCell, isCounter, deterministic) {
+    const attackMeta = typeMeta(attacker.type);
+    const defenseMeta = typeMeta(defender.type);
+    const attackSite = getSite(game, fromCell.x, fromCell.y);
+    const defenseSite = getSite(game, toCell.x, toCell.y);
+    const terrainDef = TERRAIN[game.terrain[toCell.y][toCell.x]].def;
+    const attackBuff = siteBonus(game, attackSite, attacker, "attack") + matchupBonus(attacker, defender);
+    const defenseBuff = siteBonus(game, defenseSite, defender, "defense") + terrainDef;
+    const attackHpFactor = 0.55 + attacker.hp / attacker.maxHp * 0.65;
+    const defendHpFactor = 0.55 + defender.hp / defender.maxHp * 0.55;
+    const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove ? attackMeta.charge : 0;
+    const base = (attackMeta.atk + attackBuff + attacker.rank) * attackHpFactor + charge;
+    const shield = (defenseMeta.def + defenseBuff) * defendHpFactor;
+    const variance = deterministic ? 1 : rnd(3);
+    return clamp(Math.round(base - shield * 0.58 + 2 + variance), 1, defender.hp);
+  }
+  function previewCombat(game, attacker, defender, fromCell, deterministic) {
+    const attackFrom = fromCell || { x: attacker.x, y: attacker.y };
+    const damage = computeDamage(game, attacker, defender, attackFrom, { x: defender.x, y: defender.y }, false, deterministic);
+    const targetLeft = Math.max(0, defender.hp - damage);
+    let counter = 0;
+    if (targetLeft > 0 && inUnitRange(typeMeta(defender.type).range, { x: defender.x, y: defender.y }, attackFrom)) {
+      counter = clamp(Math.round(computeDamage(game, defender, attacker, { x: defender.x, y: defender.y }, attackFrom, true, deterministic) * 0.8), 0, attacker.hp);
+    }
+    return { damage, counter, kill: targetLeft <= 0, targetLeft, selfLeft: Math.max(0, attacker.hp - counter) };
+  }
+  function canAttack(game, attacker, defender, fromCell = { x: attacker.x, y: attacker.y }) {
+    return !!attacker && !!defender && attacker.owner === game.side && !attacker.hasAttacked && areEnemies(game.teams, attacker.owner, defender.owner) && inUnitRange(typeMeta(attacker.type).range, fromCell, defender);
+  }
+
   // src/main.js
   (() => {
     "use strict";
@@ -428,7 +503,7 @@
       const byTeam = {};
       const strat = game?.stats?.strat || {};
       for (const owner of Object.keys(strat)) {
-        const team = teamOf(owner);
+        const team = teamOf2(owner);
         byTeam[team] = byTeam[team] || {};
         for (const key of Object.keys(strat[owner])) {
           byTeam[team][key] = (byTeam[team][key] || 0) + strat[owner][key];
@@ -452,7 +527,7 @@
         byOwner: JSON.parse(JSON.stringify(strat)),
         byTeam: aggregateStratByTeam(),
         cityOwners: game.sites.filter((s) => s.kind === "city").reduce((acc, s) => {
-          const t = s.owner === "neutral" ? "neutral" : teamOf(s.owner);
+          const t = s.owner === "neutral" ? "neutral" : teamOf2(s.owner);
           acc[t] = (acc[t] || 0) + 1;
           return acc;
         }, {}),
@@ -730,32 +805,23 @@
       }
       memory[objectiveKey] = entry;
     }
-    function teamOf(owner) {
-      return game?.teams?.[owner] || "A";
+    function teamOf2(owner) {
+      return teamOf(game?.teams, owner);
     }
-    function areAllies(a, b) {
-      if (!a || !b) {
-        return false;
-      }
-      if (a === b) {
-        return true;
-      }
-      if (a === "neutral" || b === "neutral") {
-        return false;
-      }
-      return teamOf(a) === teamOf(b);
+    function areAllies2(a, b) {
+      return areAllies(game?.teams, a, b);
     }
-    function areEnemies(a, b) {
-      return !!a && !!b && a !== "neutral" && b !== "neutral" && !areAllies(a, b);
+    function areEnemies2(a, b) {
+      return areEnemies(game?.teams, a, b);
     }
     function ownerName(owner) {
       if (owner === "player") {
-        return `蓝方·${teamOf(owner)}组`;
+        return `蓝方·${teamOf2(owner)}组`;
       }
       if (owner === "neutral") {
         return "中立势力";
       }
-      return `${OWNER_NAMES[Number(owner.slice(2))] || "敌军"}·${teamOf(owner)}组`;
+      return `${OWNER_NAMES[Number(owner.slice(2))] || "敌军"}·${teamOf2(owner)}组`;
     }
     function ownerShort(owner) {
       if (owner === "player") {
@@ -848,7 +914,7 @@
     function unitsAt(x, y) {
       return game.units.filter((entry) => entry.x === x && entry.y === y);
     }
-    function getSite(x, y) {
+    function getSite2(x, y) {
       return game.sites.find((entry) => entry.x === x && entry.y === y);
     }
     function isLandTile(x, y) {
@@ -1078,56 +1144,6 @@
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => $("toast").classList.add("hidden"), 1800);
     }
-    function siteBonus(siteEntry, unitEntry, mode) {
-      if (!siteEntry || !areAllies(siteEntry.owner, unitEntry.owner)) {
-        return 0;
-      }
-      const domain = typeMeta(unitEntry.type).domain;
-      if ((siteEntry.kind === "city" || siteEntry.kind === "camp" || siteEntry.kind === "barracksSmall" || siteEntry.kind === "barracksLarge") && domain === "land") {
-        const supportTier = siteMeta(siteEntry.kind).supportTier || siteEntry.tier;
-        return mode === "attack" ? supportTier : supportTier * 2;
-      }
-      if (siteEntry.kind === "shipyard" && domain === "sea") {
-        return mode === "attack" ? siteEntry.tier : siteEntry.tier + 1;
-      }
-      if (siteEntry.kind === "fortress" && domain === "sea") {
-        return mode === "attack" ? 1 : 3;
-      }
-      return 0;
-    }
-    function matchupBonus(attacker, defender) {
-      const bonusVs = typeMeta(attacker.type).bonusVs || {};
-      return bonusVs[defender.type] || 0;
-    }
-    function computeDamage(attacker, defender, fromCell, toCell, isCounter, deterministic) {
-      const attackMeta = typeMeta(attacker.type);
-      const defenseMeta = typeMeta(defender.type);
-      const attackSite = getSite(fromCell.x, fromCell.y);
-      const defenseSite = getSite(toCell.x, toCell.y);
-      const terrainDef = TERRAIN[game.terrain[toCell.y][toCell.x]].def;
-      const attackBuff = siteBonus(attackSite, attacker, "attack") + matchupBonus(attacker, defender);
-      const defenseBuff = siteBonus(defenseSite, defender, "defense") + terrainDef;
-      const attackHpFactor = 0.55 + attacker.hp / attacker.maxHp * 0.65;
-      const defendHpFactor = 0.55 + defender.hp / defender.maxHp * 0.55;
-      const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove ? attackMeta.charge : 0;
-      const base = (attackMeta.atk + attackBuff + attacker.rank) * attackHpFactor + charge;
-      const shield = (defenseMeta.def + defenseBuff) * defendHpFactor;
-      const variance = deterministic ? 1 : rnd(3);
-      return clamp(Math.round(base - shield * 0.58 + 2 + variance), 1, defender.hp);
-    }
-    function previewCombat(attacker, defender, fromCell, deterministic) {
-      const attackFrom = fromCell || { x: attacker.x, y: attacker.y };
-      const damage = computeDamage(attacker, defender, attackFrom, { x: defender.x, y: defender.y }, false, deterministic);
-      const targetLeft = Math.max(0, defender.hp - damage);
-      let counter = 0;
-      if (targetLeft > 0 && inUnitRange(typeMeta(defender.type).range, { x: defender.x, y: defender.y }, attackFrom)) {
-        counter = clamp(Math.round(computeDamage(defender, attacker, { x: defender.x, y: defender.y }, attackFrom, true, deterministic) * 0.8), 0, attacker.hp);
-      }
-      return { damage, counter, kill: targetLeft <= 0, targetLeft, selfLeft: Math.max(0, attacker.hp - counter) };
-    }
-    function canAttack(attacker, defender, fromCell = { x: attacker.x, y: attacker.y }) {
-      return !!attacker && !!defender && attacker.owner === game.side && !attacker.hasAttacked && areEnemies(attacker.owner, defender.owner) && inUnitRange(typeMeta(attacker.type).range, fromCell, defender);
-    }
     function removeUnit(unitEntry) {
       if (unitEntry.cargo?.length) {
         log(`${typeMeta(unitEntry.type).name}被击沉，船上搭载单位全部损失。`, "warning");
@@ -1140,7 +1156,7 @@
       }
     }
     function attack(attacker, defender) {
-      const result = previewCombat(attacker, defender, { x: attacker.x, y: attacker.y }, false);
+      const result = previewCombat(game, attacker, defender, { x: attacker.x, y: attacker.y }, false);
       defender.hp -= result.damage;
       defender.lastAttacked = true;
       attacker.move = 0;
@@ -1165,7 +1181,7 @@
       checkEnd();
     }
     function strategicSiteValue(siteEntry, owner, unitEntry) {
-      if (siteEntry.owner === owner || areAllies(siteEntry.owner, owner)) {
+      if (siteEntry.owner === owner || areAllies2(siteEntry.owner, owner)) {
         return 0;
       }
       let score = siteEntry.kind === "city" ? 26 : siteEntry.kind === "shipyard" ? 24 : siteEntry.kind === "camp" ? 14 : siteEntry.kind.startsWith("oil") ? 24 : siteEntry.kind.startsWith("barracks") ? 20 : 18;
@@ -1185,8 +1201,8 @@
       return score;
     }
     function captureSite(unitEntry) {
-      const siteEntry = getSite(unitEntry.x, unitEntry.y);
-      if (!siteEntry || siteEntry.owner === unitEntry.owner || areAllies(siteEntry.owner, unitEntry.owner)) {
+      const siteEntry = getSite2(unitEntry.x, unitEntry.y);
+      if (!siteEntry || siteEntry.owner === unitEntry.owner || areAllies2(siteEntry.owner, unitEntry.owner)) {
         return;
       }
       if (siteEntry.kind === "camp") {
@@ -1290,7 +1306,7 @@
     function strategicLandingScore(owner, cell) {
       let score = 0;
       for (const siteEntry of game.sites) {
-        if (areEnemies(siteEntry.owner, owner) && (siteEntry.kind === "city" || siteEntry.kind.startsWith("oil"))) {
+        if (areEnemies2(siteEntry.owner, owner) && (siteEntry.kind === "city" || siteEntry.kind.startsWith("oil"))) {
           score += 18 / (1 + dist(siteEntry, cell));
         }
       }
@@ -1307,7 +1323,7 @@
       return unloadTransport(transport, cells[0].x, cells[0].y);
     }
     function supportSites(unitEntry) {
-      return game.sites.filter((siteEntry) => areAllies(siteEntry.owner, unitEntry.owner) && ((siteEntry.kind === "city" || siteEntry.kind === "camp" || siteEntry.kind === "barracksSmall" || siteEntry.kind === "barracksLarge") && typeMeta(unitEntry.type).domain === "land" || (siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && typeMeta(unitEntry.type).domain === "sea"));
+      return game.sites.filter((siteEntry) => areAllies2(siteEntry.owner, unitEntry.owner) && ((siteEntry.kind === "city" || siteEntry.kind === "camp" || siteEntry.kind === "barracksSmall" || siteEntry.kind === "barracksLarge") && typeMeta(unitEntry.type).domain === "land" || (siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && typeMeta(unitEntry.type).domain === "sea"));
     }
     function decayTemporarySites(owner) {
       const expired = [];
@@ -1414,14 +1430,14 @@
         if (siteEntry.owner === "neutral") {
           continue;
         }
-        const bucket = ensure(teamOf(siteEntry.owner));
+        const bucket = ensure(teamOf2(siteEntry.owner));
         bucket.sites += 1;
         if (siteEntry.kind === "city") {
           bucket.cities += 1;
         }
       }
       for (const unitEntry of game.units) {
-        ensure(teamOf(unitEntry.owner)).units += 1;
+        ensure(teamOf2(unitEntry.owner)).units += 1;
       }
       return standings;
     }
@@ -1433,7 +1449,7 @@
         return;
       }
       const [leadTeam, lead] = ranked[0];
-      const playerWin = !game.settings?.spectator && teamOf("player") === leadTeam;
+      const playerWin = !game.settings?.spectator && teamOf2("player") === leadTeam;
       finish(playerWin, `战局在第 ${game.turn} 回合达到回合上限，判定 ${leadTeam} 组以 ${lead.cities} 城 / ${lead.sites} 据点领先胜出。`);
     }
     function landUnitCanReachForeignCity(unitEntry) {
@@ -1444,8 +1460,8 @@
       const queue = [{ x: unitEntry.x, y: unitEntry.y }];
       while (queue.length) {
         const current = queue.shift();
-        const siteEntry = getSite(current.x, current.y);
-        if (siteEntry?.kind === "city" && !areAllies(siteEntry.owner, unitEntry.owner)) {
+        const siteEntry = getSite2(current.x, current.y);
+        if (siteEntry?.kind === "city" && !areAllies2(siteEntry.owner, unitEntry.owner)) {
           return true;
         }
         for (const next of adjacent8(current.x, current.y)) {
@@ -1463,22 +1479,22 @@
       return false;
     }
     function teamCanContestLand(team) {
-      if (game.sites.some((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral" && teamOf(siteEntry.owner) === team)) {
+      if (game.sites.some((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) === team)) {
         return true;
       }
-      if (game.units.some((unitEntry) => teamOf(unitEntry.owner) === team && unitEntry.type === "transport" && unitEntry.cargo?.length)) {
+      if (game.units.some((unitEntry) => teamOf2(unitEntry.owner) === team && unitEntry.type === "transport" && unitEntry.cargo?.length)) {
         return true;
       }
-      const landUnits = game.units.filter((unitEntry) => teamOf(unitEntry.owner) === team && typeMeta(unitEntry.type).domain === "land");
+      const landUnits = game.units.filter((unitEntry) => teamOf2(unitEntry.owner) === team && typeMeta(unitEntry.type).domain === "land");
       if (landUnits.some(landUnitCanReachForeignCity)) {
         return true;
       }
-      const hasTransport = game.units.some((unitEntry) => teamOf(unitEntry.owner) === team && unitEntry.type === "transport");
-      const hasShipyard = game.sites.some((siteEntry) => siteEntry.kind === "shipyard" && teamOf(siteEntry.owner) === team);
+      const hasTransport = game.units.some((unitEntry) => teamOf2(unitEntry.owner) === team && unitEntry.type === "transport");
+      const hasShipyard = game.sites.some((siteEntry) => siteEntry.kind === "shipyard" && teamOf2(siteEntry.owner) === team);
       return !!landUnits.length && (hasTransport || hasShipyard);
     }
     function dominantCityTeam() {
-      const cityTeams = [...new Set(game.sites.filter((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral").map((siteEntry) => teamOf(siteEntry.owner)))];
+      const cityTeams = [...new Set(game.sites.filter((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)))];
       return cityTeams.length === 1 ? cityTeams[0] : null;
     }
     function checkEnd() {
@@ -1488,31 +1504,31 @@
       if (game.settings?.spectator) {
         const activeTeams2 = /* @__PURE__ */ new Set();
         for (const unitEntry of game.units) {
-          activeTeams2.add(teamOf(unitEntry.owner));
+          activeTeams2.add(teamOf2(unitEntry.owner));
         }
         for (const siteEntry of game.sites) {
           if (siteEntry.owner !== "neutral") {
-            activeTeams2.add(teamOf(siteEntry.owner));
+            activeTeams2.add(teamOf2(siteEntry.owner));
           }
         }
         if (game.settings.mode === "skirmish") {
-          const combatTeams = new Set(game.units.map((unitEntry) => teamOf(unitEntry.owner)));
+          const combatTeams = new Set(game.units.map((unitEntry) => teamOf2(unitEntry.owner)));
           if (combatTeams.size === 1 && combatTeams.size > 0) {
             finish(true, `${[...combatTeams][0]} 组赢得了观战遭遇战。`);
           }
           return;
         }
         if (game.settings.mode === "survival" && game.turn >= 12) {
-          const ranked = [...activeTeams2].sort((a, b) => game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf(siteEntry.owner) === b).length - game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf(siteEntry.owner) === a).length);
+          const ranked = [...activeTeams2].sort((a, b) => game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf2(siteEntry.owner) === b).length - game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf2(siteEntry.owner) === a).length);
           if (ranked[0]) {
             finish(true, `${ranked[0]} 组在观战守城模式中存活到第12回合。`);
           }
           return;
         }
-        const hostileTeams2 = new Set(game.sites.filter((siteEntry) => (siteEntry.kind === "city" || siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral").map((siteEntry) => teamOf(siteEntry.owner)));
+        const hostileTeams2 = new Set(game.sites.filter((siteEntry) => (siteEntry.kind === "city" || siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)));
         if (hostileTeams2.size === 1) {
           const winnerTeam = [...hostileTeams2][0];
-          const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf(payload.owner) !== winnerTeam));
+          const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== winnerTeam));
           if (!enemyEngineers) {
             finish(true, `${winnerTeam} 组完成了全部敌对城市与海上据点占领，并清除了敌方工程师。`);
             return;
@@ -1523,20 +1539,20 @@
         }
         return;
       }
-      const playerTeam = teamOf("player");
+      const playerTeam = teamOf2("player");
       const activeTeams = /* @__PURE__ */ new Set();
       for (const unitEntry of game.units) {
-        activeTeams.add(teamOf(unitEntry.owner));
+        activeTeams.add(teamOf2(unitEntry.owner));
       }
       for (const siteEntry of game.sites) {
         if (siteEntry.owner !== "neutral") {
-          activeTeams.add(teamOf(siteEntry.owner));
+          activeTeams.add(teamOf2(siteEntry.owner));
         }
       }
       const playerAlive = [...activeTeams].includes(playerTeam);
       if (game.settings.mode === "survival") {
-        const alliedCity = game.sites.some((siteEntry) => siteEntry.kind === "city" && areAllies(siteEntry.owner, "player"));
-        if (!alliedCity && !game.units.some((unitEntry) => areAllies(unitEntry.owner, "player"))) {
+        const alliedCity = game.sites.some((siteEntry) => siteEntry.kind === "city" && areAllies2(siteEntry.owner, "player"));
+        if (!alliedCity && !game.units.some((unitEntry) => areAllies2(unitEntry.owner, "player"))) {
           finish(false, "你的组已经失去全部立足点。");
           return;
         }
@@ -1546,7 +1562,7 @@
         return;
       }
       if (game.settings.mode === "skirmish") {
-        const combatTeams = new Set(game.units.map((unitEntry) => teamOf(unitEntry.owner)));
+        const combatTeams = new Set(game.units.map((unitEntry) => teamOf2(unitEntry.owner)));
         if (!combatTeams.has(playerTeam)) {
           finish(false, "你的组全部野战部队已被消灭。");
           return;
@@ -1556,19 +1572,19 @@
         }
         return;
       }
-      const enemyControlledCities = game.sites.filter((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral" && teamOf(siteEntry.owner) !== playerTeam);
-      const enemyControlledSeaSites = game.sites.filter((siteEntry) => (siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral" && teamOf(siteEntry.owner) !== playerTeam);
+      const enemyControlledCities = game.sites.filter((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) !== playerTeam);
+      const enemyControlledSeaSites = game.sites.filter((siteEntry) => (siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) !== playerTeam);
       if (!enemyControlledCities.length && !enemyControlledSeaSites.length) {
-        const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf(unitEntry.owner) !== playerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf(payload.owner) !== playerTeam));
+        const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== playerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== playerTeam));
         if (!enemyEngineers) {
           finish(true, "你已占领全部敌对城市与海上据点，并清除了全部敌方工程师。");
           return;
         }
       }
-      const hostileTeams = new Set(game.sites.filter((siteEntry) => (siteEntry.kind === "city" || siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral").map((siteEntry) => teamOf(siteEntry.owner)));
+      const hostileTeams = new Set(game.sites.filter((siteEntry) => (siteEntry.kind === "city" || siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)));
       if (hostileTeams.size === 1 && !hostileTeams.has(playerTeam)) {
         const winnerTeam = [...hostileTeams][0];
-        const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf(payload.owner) !== winnerTeam));
+        const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== winnerTeam));
         if (!enemyEngineers) {
           finish(false, "敌方已占领全部城市与海上据点，并清除了你方全部工程师。");
           return;
@@ -1607,9 +1623,9 @@
     }
     function sideLabel() {
       if (game.settings?.spectator) {
-        return `观战中 · ${ownerShort(game.side)}行动中 · ${teamOf(game.side)}组`;
+        return `观战中 · ${ownerShort(game.side)}行动中 · ${teamOf2(game.side)}组`;
       }
-      return game.side === "player" ? `你的回合 · ${teamOf("player")}组` : `${ownerShort(game.side)}行动中 · ${teamOf(game.side)}组`;
+      return game.side === "player" ? `你的回合 · ${teamOf2("player")}组` : `${ownerShort(game.side)}行动中 · ${teamOf2(game.side)}组`;
     }
     function buildableTypes(siteEntry) {
       const domain = siteMeta(siteEntry.kind).domain;
@@ -1697,7 +1713,7 @@
       return adjacent8(unitEntry.x, unitEntry.y).filter((cell) => isWaterTile(cell.x, cell.y) && !getUnit(cell.x, cell.y));
     }
     function canBuildCamp(unitEntry) {
-      return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && isLandTile(unitEntry.x, unitEntry.y) && !getSite(unitEntry.x, unitEntry.y) && game.goldByOwner[unitEntry.owner] >= CAMP_COST && campCount(unitEntry.owner) < MAX_CAMPS_PER_SIDE;
+      return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && isLandTile(unitEntry.x, unitEntry.y) && !getSite2(unitEntry.x, unitEntry.y) && game.goldByOwner[unitEntry.owner] >= CAMP_COST && campCount(unitEntry.owner) < MAX_CAMPS_PER_SIDE;
     }
     function canEngineerLaunch(unitEntry, type, cell, cargoTypes = []) {
       const totalCost = type === "transport" ? transportCost(cargoTypes) : typeMeta(type).cost;
@@ -1924,9 +1940,9 @@
       if (activeUnit) {
         const unitEntry = activeUnit;
         const meta = typeMeta(unitEntry.type);
-        const siteEntry = getSite(unitEntry.x, unitEntry.y);
-        const attackBuff = siteBonus(siteEntry, unitEntry, "attack");
-        const defenseBuff = siteBonus(siteEntry, unitEntry, "defense");
+        const siteEntry = getSite2(unitEntry.x, unitEntry.y);
+        const attackBuff = siteBonus(game, siteEntry, unitEntry, "attack");
+        const defenseBuff = siteBonus(game, siteEntry, unitEntry, "defense");
         $("selIcon").textContent = meta.icon;
         $("selName").textContent = meta.name;
         $("selOwner").textContent = ownerName(unitEntry.owner);
@@ -2049,7 +2065,7 @@
         kind,
         ref,
         unit: kind === "unit" ? ref : getUnit(ref.x, ref.y),
-        site: kind === "site" ? ref : getSite(ref.x, ref.y)
+        site: kind === "site" ? ref : getSite2(ref.x, ref.y)
       };
       refresh();
     }
@@ -2071,7 +2087,7 @@
         return;
       }
       const targetUnit = getUnit(cell.x, cell.y);
-      const targetSite = getSite(cell.x, cell.y);
+      const targetSite = getSite2(cell.x, cell.y);
       const selectedUnit2 = game.selected?.kind === "unit" ? game.selected.ref : null;
       const ownUnit = selectedUnit2 && selectedUnit2.owner === "player" ? selectedUnit2 : null;
       if (game.settings?.spectator) {
@@ -2114,7 +2130,7 @@
         }
         return;
       }
-      if (ownUnit && targetUnit && canAttack(ownUnit, targetUnit)) {
+      if (ownUnit && targetUnit && canAttack(game, ownUnit, targetUnit)) {
         attack(ownUnit, targetUnit);
         selectRef(game.units.includes(ownUnit) ? "unit" : null, game.units.includes(ownUnit) ? ownUnit : null);
         return;
@@ -2466,7 +2482,7 @@
     function buildStrategicIntent(owner, profile) {
       const diffCfg = DIFF[profile.diff];
       const memory = frontMemory(owner);
-      const enemies = game.units.filter((unitEntry) => areEnemies(unitEntry.owner, owner));
+      const enemies = game.units.filter((unitEntry) => areEnemies2(unitEntry.owner, owner));
       const focusTarget = enemies.map((unitEntry) => {
         const pressure = projectedPressure(owner, unitEntry, diffCfg.lookahead);
         return {
@@ -2563,21 +2579,21 @@
     }
     function enemyThreat(owner, x, y) {
       let score = 0;
-      for (const enemy of game.units.filter((entry) => areEnemies(entry.owner, owner))) {
+      for (const enemy of game.units.filter((entry) => areEnemies2(entry.owner, owner))) {
         const reach = enemy.move + typeMeta(enemy.type).range;
         const d = dist(enemy, { x, y });
         if (d <= reach + 1) {
           score += typeMeta(enemy.type).atk * (enemy.hp / enemy.maxHp) * (d <= typeMeta(enemy.type).range ? 1.2 : 0.55);
         }
       }
-      const siteEntry = getSite(x, y);
-      if (siteEntry && areAllies(siteEntry.owner, owner)) {
+      const siteEntry = getSite2(x, y);
+      if (siteEntry && areAllies2(siteEntry.owner, owner)) {
         score *= 0.82;
       }
       return score;
     }
     function friendSupport(owner, x, y) {
-      return game.units.filter((entry) => areAllies(entry.owner, owner) && dist(entry, { x, y }) <= 3).length * 1.4;
+      return game.units.filter((entry) => areAllies2(entry.owner, owner) && dist(entry, { x, y }) <= 3).length * 1.4;
     }
     function allyCongestion(owner, cell, excludeId = null) {
       let total = 0;
@@ -2592,7 +2608,7 @@
       return total;
     }
     function cityEconomyValue(siteEntry, owner) {
-      if (areAllies(siteEntry.owner, owner)) {
+      if (areAllies2(siteEntry.owner, owner)) {
         return 0;
       }
       const earlyTurnBonus = Math.max(0, 10 - game.turn) * 1.8;
@@ -2681,11 +2697,11 @@
       return typeMeta(unitEntry.type).level * 8 + unitEntry.hp * 0.4 + (unitEntry.type === "engineer" ? 14 : 0);
     }
     function nearbyEnemies(cell, owner, radius = 1) {
-      return game.units.filter((unitEntry) => areEnemies(unitEntry.owner, owner) && dist(unitEntry, cell) <= radius).length;
+      return game.units.filter((unitEntry) => areEnemies2(unitEntry.owner, owner) && dist(unitEntry, cell) <= radius).length;
     }
     function unitRoleCellBonus(owner, unitEntry, cell, intent) {
       const type = unitEntry.type;
-      const siteEntry = getSite(cell.x, cell.y);
+      const siteEntry = getSite2(cell.x, cell.y);
       const coastal = adjacent8(cell.x, cell.y).some((next) => isWaterTile(next.x, next.y));
       let score = 0;
       if (type === "scout") {
@@ -2706,10 +2722,10 @@
         score -= game.terrain[cell.y][cell.x] === "forest" ? 3 : 0;
       }
       if (type === "guard") {
-        score += siteEntry && areAllies(siteEntry.owner, owner) && (siteEntry.kind === "city" || siteEntry.kind.startsWith("barracks")) ? 8 : 0;
+        score += siteEntry && areAllies2(siteEntry.owner, owner) && (siteEntry.kind === "city" || siteEntry.kind.startsWith("barracks")) ? 8 : 0;
       }
       if (type === "warship") {
-        score += siteEntry?.kind === "shipyard" && !areAllies(siteEntry.owner, owner) ? 10 : 0;
+        score += siteEntry?.kind === "shipyard" && !areAllies2(siteEntry.owner, owner) ? 10 : 0;
         const escort = game.units.find((entry) => entry.owner === owner && entry.type === "transport" && entry.cargo?.length && dist(entry, cell) <= 3);
         if (escort) {
           score += 4;
@@ -2765,7 +2781,7 @@
       cells.push({ x: unitEntry.x, y: unitEntry.y, cost: 0 });
       const objective = bestObjective(owner, unitEntry, intent);
       const distanceField = buildDistanceField(unitEntry, objective);
-      const enemies = game.units.filter((entry) => areEnemies(entry.owner, owner));
+      const enemies = game.units.filter((entry) => areEnemies2(entry.owner, owner));
       const assaultSaturated = intent?.assaultSite && isBridgeheadSite(intent.assaultSite) ? frontlineCount(owner, intent.assaultSite, 2) >= 5 : false;
       const assaultMag = assaultSaturated ? 0.4 : 1;
       const expansionMag = assaultSaturated ? 1.5 : 1;
@@ -2777,7 +2793,7 @@
         const supportScore = friendSupport(owner, cell.x, cell.y);
         const riskPenalty = enemyThreat(owner, cell.x, cell.y) * diffCfg.risk * aggCfg.preserve * 0.9;
         const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state.stalledTurns * 0.7);
-        const siteEntry = getSite(cell.x, cell.y);
+        const siteEntry = getSite2(cell.x, cell.y);
         const captureScore = siteEntry ? strategicSiteValue(siteEntry, owner, unitEntry) + cityEconomyValue(siteEntry, owner) : 0;
         const intentBonus = intent?.assaultSite ? Math.max(0, dist(unitEntry, intent.assaultSite) - dist(cell, intent.assaultSite)) * 1.4 * assaultMag : 0;
         const expansionBonus = intent?.expansionSite ? Math.max(0, dist(unitEntry, intent.expansionSite) - dist(cell, intent.expansionSite)) * 1.9 * aggCfg.expansion * expansionMag : 0;
@@ -2793,7 +2809,7 @@
           if (dist(cell, enemy) > typeMeta(unitEntry.type).range) {
             continue;
           }
-          const preview = previewCombat(unitEntry, enemy, cell, true);
+          const preview = previewCombat(game, unitEntry, enemy, cell, true);
           const focusBonus = intent?.focusTarget?.id === enemy.id ? 18 + projectedPressure(owner, enemy, diffCfg.lookahead, unitEntry.id) * 0.22 : 0;
           const followUpBonus = projectedPressure(owner, enemy, diffCfg.lookahead, unitEntry.id) * 0.18;
           const chaseBonus = enemy.hp <= enemy.maxHp * 0.45 ? 8 * aggCfg.chase : 0;
@@ -2809,15 +2825,15 @@
     function buildScore(owner, siteEntry, type, cargoTypes = []) {
       const meta = typeMeta(type);
       const ownUnits = game.units.filter((entry) => entry.owner === owner);
-      const enemySea = game.units.filter((entry) => areEnemies(entry.owner, owner) && typeMeta(entry.type).domain === "sea").length;
-      const enemyCavalry = game.units.filter((entry) => areEnemies(entry.owner, owner) && entry.type === "cavalry").length;
+      const enemySea = game.units.filter((entry) => areEnemies2(entry.owner, owner) && typeMeta(entry.type).domain === "sea").length;
+      const enemyCavalry = game.units.filter((entry) => areEnemies2(entry.owner, owner) && entry.type === "cavalry").length;
       const ownSea = ownUnits.filter((entry) => typeMeta(entry.type).domain === "sea").length;
       const ownLand = ownUnits.filter((entry) => typeMeta(entry.type).domain === "land").length;
       const ownWarships = ownUnits.filter((entry) => entry.type === "warship").length;
       const ownTransports = ownUnits.filter((entry) => entry.type === "transport").length;
       const ownEngineers = ownUnits.filter((entry) => entry.type === "engineer").length;
       const loadedTransports = ownUnits.filter((entry) => entry.type === "transport" && entry.cargo?.length).length;
-      const enemyHasCities = game.sites.some((entry) => entry.kind === "city" && areEnemies(entry.owner, owner));
+      const enemyHasCities = game.sites.some((entry) => entry.kind === "city" && areEnemies2(entry.owner, owner));
       const landStranded = enemyHasCities && !hasLandReachToEnemyCity(owner) && ownLand > ownTransports * FERRY_THROUGHPUT + 6;
       let score = meta.level * 6 + meta.atk + meta.def * 0.5 + meta.move * 0.4;
       if (landStranded && meta.domain === "land") {
@@ -2951,7 +2967,7 @@
       return cells[0] || null;
     }
     function teamNeedsEngineer(owner) {
-      const enemyCities = game.sites.filter((siteEntry) => siteEntry.kind === "city" && areEnemies(siteEntry.owner, owner));
+      const enemyCities = game.sites.filter((siteEntry) => siteEntry.kind === "city" && areEnemies2(siteEntry.owner, owner));
       const ownedEngineers = game.units.filter((unitEntry) => unitEntry.owner === owner && unitEntry.type === "engineer").length;
       return !ownedEngineers || !!enemyCities.length && !hasLandReachToEnemyCity(owner);
     }
@@ -2975,14 +2991,14 @@
     }
     function engineerBuildChoice(owner, engineer, intent) {
       const waterCells = engineerBuildCells(engineer);
-      const enemyCities = game.sites.filter((siteEntry) => siteEntry.kind === "city" && areEnemies(siteEntry.owner, owner));
+      const enemyCities = game.sites.filter((siteEntry) => siteEntry.kind === "city" && areEnemies2(siteEntry.owner, owner));
       const nearestEnemyCity = enemyCities.length ? enemyCities.sort((a, b) => dist(a, engineer) - dist(b, engineer))[0] : null;
       const hasTransport = game.units.some((unitEntry) => unitEntry.owner === owner && unitEntry.type === "transport");
       const landFrontExists = hasLandReachToEnemyCity(owner);
-      const nearFront = nearestEnemyCity && dist(engineer, nearestEnemyCity) <= 6 || game.units.some((unitEntry) => areEnemies(unitEntry.owner, owner) && dist(unitEntry, engineer) <= 5);
+      const nearFront = nearestEnemyCity && dist(engineer, nearestEnemyCity) <= 6 || game.units.some((unitEntry) => areEnemies2(unitEntry.owner, owner) && dist(unitEntry, engineer) <= 5);
       const safeEnough = enemyThreat(owner, engineer.x, engineer.y) < typeMeta("engineer").hp * 0.6;
       const canAffordForwardBase = game.goldByOwner[owner] >= CAMP_COST + typeMeta("swordsman").cost;
-      const needsCamp = landFrontExists && !getSite(engineer.x, engineer.y) && campCount(owner) < MAX_CAMPS_PER_SIDE && canAffordForwardBase && nearFront && safeEnough && !atUnitCap(owner, "land");
+      const needsCamp = landFrontExists && !getSite2(engineer.x, engineer.y) && campCount(owner) < MAX_CAMPS_PER_SIDE && canAffordForwardBase && nearFront && safeEnough && !atUnitCap(owner, "land");
       if (needsCamp && canBuildCamp(engineer)) {
         return { kind: "camp" };
       }
@@ -2999,7 +3015,7 @@
           return { kind: "transport", cell, cargoTypes };
         }
       }
-      const enemySea = game.units.some((unitEntry) => areEnemies(unitEntry.owner, owner) && typeMeta(unitEntry.type).domain === "sea");
+      const enemySea = game.units.some((unitEntry) => areEnemies2(unitEntry.owner, owner) && typeMeta(unitEntry.type).domain === "sea");
       if (enemySea && game.goldByOwner[owner] >= typeMeta("warship").cost) {
         return { kind: "warship", cell: waterCells[0], cargoTypes: [] };
       }
@@ -3016,7 +3032,7 @@
       if (unitEntry.hasAttacked) {
         return false;
       }
-      const targets = game.units.filter((entry) => canAttack(unitEntry, entry));
+      const targets = game.units.filter((entry) => canAttack(game, unitEntry, entry));
       if (!targets.length) {
         return false;
       }
@@ -3026,7 +3042,7 @@
     }
     function bridgeheadDefendCell(owner, unitEntry) {
       const midY = Math.floor(H * BRIDGEHEAD_DEFEND_FRACTION);
-      const enemies = game.units.filter((entry) => areEnemies(entry.owner, owner));
+      const enemies = game.units.filter((entry) => areEnemies2(entry.owner, owner));
       const upperEnemies = enemies.filter((entry) => entry.y < midY);
       const focus = (upperEnemies.length ? upperEnemies : enemies).sort((a, b) => dist(a, unitEntry) - dist(b, unitEntry))[0];
       const cells = [...reachable(unitEntry).keys()].map((key) => {
@@ -3087,7 +3103,7 @@
       if (unitEntry.hasAttacked) {
         return false;
       }
-      const targets = game.units.filter((entry) => canAttack(unitEntry, entry));
+      const targets = game.units.filter((entry) => canAttack(game, unitEntry, entry));
       if (!targets.length) {
         return false;
       }
@@ -3098,7 +3114,7 @@
     }
     function navalPatrolCell(owner, warship) {
       const line = Math.floor(H * BRIDGEHEAD_DEFEND_FRACTION);
-      const enemies = game.units.filter((entry) => areEnemies(entry.owner, owner));
+      const enemies = game.units.filter((entry) => areEnemies2(entry.owner, owner));
       const seaFocus = enemies.filter((entry) => (typeMeta(entry.type).domain === "sea" || entry.type === "transport") && entry.y < line);
       const focus = (seaFocus.length ? seaFocus : enemies).sort((a, b) => dist(a, warship) - dist(b, warship))[0];
       const cells = [...reachable(warship).keys()].map((key) => {
@@ -3123,7 +3139,7 @@
         return { x, y };
       });
       cells.push({ x: unitEntry.x, y: unitEntry.y });
-      const nearEnemy = game.units.filter((entry) => areEnemies(entry.owner, owner) && typeMeta(entry.type).domain === "land").sort((a, b) => dist(a, unitEntry) - dist(b, unitEntry))[0];
+      const nearEnemy = game.units.filter((entry) => areEnemies2(entry.owner, owner) && typeMeta(entry.type).domain === "land").sort((a, b) => dist(a, unitEntry) - dist(b, unitEntry))[0];
       if (nearEnemy && dist(nearEnemy, unitEntry) <= 6) {
         cells.sort((a, b) => dist(a, nearEnemy) - dist(b, nearEnemy));
         return cells[0];
@@ -3287,7 +3303,7 @@
         if (choice.move && (choice.move.x !== unitEntry.x || choice.move.y !== unitEntry.y)) {
           moveUnit(unitEntry, choice.move.x, choice.move.y);
         }
-        if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(unitEntry, choice.target)) {
+        if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(game, unitEntry, choice.target)) {
           attack(unitEntry, choice.target);
         }
         finalizeUnitState(unitEntry, state, objectiveKey, !sameCell(startCell, unitEntry));
@@ -3964,7 +3980,7 @@
         game.over = false;
         game.freeplay = true;
         game.side = "player";
-        for (const unitEntry of game.units.filter((entry) => areAllies(entry.owner, "player"))) {
+        for (const unitEntry of game.units.filter((entry) => areAllies2(entry.owner, "player"))) {
           unitEntry.maxMove = effectiveMove(unitEntry);
           unitEntry.move = unitEntry.maxMove;
           unitEntry.acted = false;

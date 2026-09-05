@@ -11,6 +11,8 @@ import {
 } from './core/utils.js';
 import { saveStore } from './io/storage.js';
 import { terrainFor } from './core/mapgen.js';
+import { teamOf as teamOfPure, areAllies as areAlliesPure, areEnemies as areEnemiesPure } from './core/teams.js';
+import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from './core/combat.js';
 
 (() => {
   'use strict';
@@ -427,24 +429,15 @@ import { terrainFor } from './core/mapgen.js';
   }
 
   function teamOf(owner) {
-    return game?.teams?.[owner] || 'A';
+    return teamOfPure(game?.teams, owner);
   }
 
   function areAllies(a, b) {
-    if (!a || !b) {
-      return false;
-    }
-    if (a === b) {
-      return true;
-    }
-    if (a === 'neutral' || b === 'neutral') {
-      return false;
-    }
-    return teamOf(a) === teamOf(b);
+    return areAlliesPure(game?.teams, a, b);
   }
 
   function areEnemies(a, b) {
-    return !!a && !!b && a !== 'neutral' && b !== 'neutral' && !areAllies(a, b);
+    return areEnemiesPure(game?.teams, a, b);
   }
 
   function ownerName(owner) {
@@ -829,61 +822,6 @@ import { terrainFor } from './core/mapgen.js';
     toastTimer = setTimeout(() => $('toast').classList.add('hidden'), 1800);
   }
 
-  function siteBonus(siteEntry, unitEntry, mode) {
-    if (!siteEntry || !areAllies(siteEntry.owner, unitEntry.owner)) {
-      return 0;
-    }
-    const domain = typeMeta(unitEntry.type).domain;
-    if ((siteEntry.kind === 'city' || siteEntry.kind === 'camp' || siteEntry.kind === 'barracksSmall' || siteEntry.kind === 'barracksLarge') && domain === 'land') {
-      const supportTier = siteMeta(siteEntry.kind).supportTier || siteEntry.tier;
-      return mode === 'attack' ? supportTier : supportTier * 2;
-    }
-    if (siteEntry.kind === 'shipyard' && domain === 'sea') {
-      return mode === 'attack' ? siteEntry.tier : siteEntry.tier + 1;
-    }
-    if (siteEntry.kind === 'fortress' && domain === 'sea') {
-      return mode === 'attack' ? 1 : 3;
-    }
-    return 0;
-  }
-
-  function matchupBonus(attacker, defender) {
-    const bonusVs = typeMeta(attacker.type).bonusVs || {};
-    return bonusVs[defender.type] || 0;
-  }
-
-  function computeDamage(attacker, defender, fromCell, toCell, isCounter, deterministic) {
-    const attackMeta = typeMeta(attacker.type);
-    const defenseMeta = typeMeta(defender.type);
-    const attackSite = getSite(fromCell.x, fromCell.y);
-    const defenseSite = getSite(toCell.x, toCell.y);
-    const terrainDef = TERRAIN[game.terrain[toCell.y][toCell.x]].def;
-    const attackBuff = siteBonus(attackSite, attacker, 'attack') + matchupBonus(attacker, defender);
-    const defenseBuff = siteBonus(defenseSite, defender, 'defense') + terrainDef;
-    const attackHpFactor = 0.55 + attacker.hp / attacker.maxHp * 0.65;
-    const defendHpFactor = 0.55 + defender.hp / defender.maxHp * 0.55;
-    const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove ? attackMeta.charge : 0;
-    const base = (attackMeta.atk + attackBuff + attacker.rank) * attackHpFactor + charge;
-    const shield = (defenseMeta.def + defenseBuff) * defendHpFactor;
-    const variance = deterministic ? 1 : rnd(3);
-    return clamp(Math.round(base - shield * 0.58 + 2 + variance), 1, defender.hp);
-  }
-
-  function previewCombat(attacker, defender, fromCell, deterministic) {
-    const attackFrom = fromCell || { x: attacker.x, y: attacker.y };
-    const damage = computeDamage(attacker, defender, attackFrom, { x: defender.x, y: defender.y }, false, deterministic);
-    const targetLeft = Math.max(0, defender.hp - damage);
-    let counter = 0;
-    if (targetLeft > 0 && inUnitRange(typeMeta(defender.type).range, { x: defender.x, y: defender.y }, attackFrom)) {
-      counter = clamp(Math.round(computeDamage(defender, attacker, { x: defender.x, y: defender.y }, attackFrom, true, deterministic) * 0.8), 0, attacker.hp);
-    }
-    return { damage, counter, kill: targetLeft <= 0, targetLeft, selfLeft: Math.max(0, attacker.hp - counter) };
-  }
-
-  function canAttack(attacker, defender, fromCell = { x: attacker.x, y: attacker.y }) {
-    return !!attacker && !!defender && attacker.owner === game.side && !attacker.hasAttacked && areEnemies(attacker.owner, defender.owner) && inUnitRange(typeMeta(attacker.type).range, fromCell, defender);
-  }
-
   function removeUnit(unitEntry) {
     if (unitEntry.cargo?.length) {
       log(`${typeMeta(unitEntry.type).name}被击沉，船上搭载单位全部损失。`, 'warning');
@@ -898,7 +836,7 @@ import { terrainFor } from './core/mapgen.js';
   }
 
   function attack(attacker, defender) {
-    const result = previewCombat(attacker, defender, { x: attacker.x, y: attacker.y }, false);
+    const result = previewCombat(game, attacker, defender, { x: attacker.x, y: attacker.y }, false);
     defender.hp -= result.damage;
     defender.lastAttacked = true;
     attacker.move = 0;
@@ -1741,8 +1679,8 @@ import { terrainFor } from './core/mapgen.js';
       const unitEntry = activeUnit;
       const meta = typeMeta(unitEntry.type);
       const siteEntry = getSite(unitEntry.x, unitEntry.y);
-      const attackBuff = siteBonus(siteEntry, unitEntry, 'attack');
-      const defenseBuff = siteBonus(siteEntry, unitEntry, 'defense');
+      const attackBuff = siteBonus(game, siteEntry, unitEntry, 'attack');
+      const defenseBuff = siteBonus(game, siteEntry, unitEntry, 'defense');
       $('selIcon').textContent = meta.icon;
       $('selName').textContent = meta.name;
       $('selOwner').textContent = ownerName(unitEntry.owner);
@@ -1947,7 +1885,7 @@ import { terrainFor } from './core/mapgen.js';
       }
       return;
     }
-    if (ownUnit && targetUnit && canAttack(ownUnit, targetUnit)) {
+    if (ownUnit && targetUnit && canAttack(game, ownUnit, targetUnit)) {
       attack(ownUnit, targetUnit);
       selectRef(game.units.includes(ownUnit) ? 'unit' : null, game.units.includes(ownUnit) ? ownUnit : null);
       return;
@@ -2682,7 +2620,7 @@ import { terrainFor } from './core/mapgen.js';
         if (dist(cell, enemy) > typeMeta(unitEntry.type).range) {
           continue;
         }
-        const preview = previewCombat(unitEntry, enemy, cell, true);
+        const preview = previewCombat(game, unitEntry, enemy, cell, true);
         const focusBonus = intent?.focusTarget?.id === enemy.id ? 18 + projectedPressure(owner, enemy, diffCfg.lookahead, unitEntry.id) * 0.22 : 0;
         const followUpBonus = projectedPressure(owner, enemy, diffCfg.lookahead, unitEntry.id) * 0.18;
         const chaseBonus = enemy.hp <= enemy.maxHp * 0.45 ? 8 * aggCfg.chase : 0;
@@ -2924,7 +2862,7 @@ import { terrainFor } from './core/mapgen.js';
     if (unitEntry.hasAttacked) {
       return false;
     }
-    const targets = game.units.filter(entry => canAttack(unitEntry, entry));
+    const targets = game.units.filter(entry => canAttack(game, unitEntry, entry));
     if (!targets.length) {
       return false;
     }
@@ -3000,7 +2938,7 @@ import { terrainFor } from './core/mapgen.js';
     if (unitEntry.hasAttacked) {
       return false;
     }
-    const targets = game.units.filter(entry => canAttack(unitEntry, entry));
+    const targets = game.units.filter(entry => canAttack(game, unitEntry, entry));
     if (!targets.length) {
       return false;
     }
@@ -3205,7 +3143,7 @@ import { terrainFor } from './core/mapgen.js';
       if (choice.move && (choice.move.x !== unitEntry.x || choice.move.y !== unitEntry.y)) {
         moveUnit(unitEntry, choice.move.x, choice.move.y);
       }
-      if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(unitEntry, choice.target)) {
+      if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(game, unitEntry, choice.target)) {
         attack(unitEntry, choice.target);
       }
       finalizeUnitState(unitEntry, state, objectiveKey, !sameCell(startCell, unitEntry));
