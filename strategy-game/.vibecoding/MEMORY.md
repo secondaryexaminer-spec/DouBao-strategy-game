@@ -6,13 +6,19 @@
 - 纯前端回合制策略游戏 v0.1.2；`src/main.js`（165KB 单文件，重构中）含逻辑；esbuild 打包为 `js/game.js`（IIFE，file:// 可开）。
 - 无头模拟：`sim/harness.js`（DOM shim）+ `sim/run.js`（批量对局）+ `sim/suite.js`（4 场景平衡回归）。AI 逻辑与浏览器共用同一打包产物，零分叉。
 - git：仓库在 `E:\WorkPlace\DouBao-WorkPlace\strategy-game`（外层），远程已改为 `https://github.com/secondaryexaminer-spec/DouBao-strategy-game.git`。
-- 重构进度：第一阶段抽取中——已抽 `src/core/mapgen.js`（地图生成）、`src/core/teams.js`（阵营判定）、`src/core/combat.js`（战斗计算，game 显式传入）；每次抽取均用同种子模拟验证行为等价。main.js 现约 158KB。
-- 待抽：`rng.js`（确定性随机，模拟器升级关键）、`combat 副作用`（attack/removeUnit）、`movement.js`、`turn.js`。
+- 重构进度：第一阶段抽取中——已抽 `src/core/mapgen.js`（地图生成）、`src/core/teams.js`（阵营判定）、`src/core/combat.js`（战斗计算）、`src/core/rng.js`（确定性 LCG）、`src/core/movement.js`（寻路 reachable/passable）；每次抽取均用同种子模拟验证行为等价。main.js 现约 157KB。game 对象已加 w/h 字段供 core 模块使用。
+- 待抽：`turn.js`（回合/胜负）、`economy.js`（收入/生产）、`factory.js`（单位/据点工厂）。重构为长期贯穿性工作，随新功能需求驱动。
 
 ## 已知问题清单（待处理）
 1. **推送未完成**：本地已提交（`32d3d20` 等 3 个提交），但 2026-09-05 推送时 github.com:443 连不通（无代理、TCP 失败）。网络恢复后 `git push origin main` 即可。
 2. **存档路径提示过期**：`index.html` 内两处提示写死旧路径 `E:\WorkPlace\VScode workplace\strategy-game\saves`，实际应为 `E:\WorkPlace\DouBao-WorkPlace\strategy-game\strategy-game\saves`。
 3. **`src/sim/` 空目录**：无内容，疑似遗留，可清理或忽略。
+4. **平衡性问题（待办，非重构引入）**：suite 2/4 失败——mirror-strait B 胜率 13%（期望 25-75%）、diff-gap 冷酷 50%（期望 ≥60%）。已用 worktree 对照验证为重构前既有问题。后续 AI 改良时处理。
+
+## 路线图（用户确认）
+1. **地基重构**（进行中）：core 层拆分（mapgen ✅ / teams ✅ / combat ✅ / rng → movement → turn）
+2. **模拟器升级**：直接 import core/ai 模块（替代 eval 打包产物）+ 确定性 RNG + 状态快照 trace
+3. **同步开始**（地基+模拟器差不多后）：增加新兵种 / 改良 AI 算法让 AI 更有策略思维（以冷酷难度为训练基准）
 
 ## 踩坑与根因（按时间倒序）
 - **2026-09-05 · 抽取边界事故**：重构删除段用字符串锚点（`siteBonus` 定义 → `attack` 定义）定位，未核实区间内是否含其他函数，误删了有副作用的 `removeUnit`，导致 sim 报 `removeUnit is not defined`。教训：**切段删除前先列出区间内全部函数清单，副作用函数（改状态/日志/统计）一律留在 main.js**；错误信息直接指认根因（黑箱协议第 4 步）。

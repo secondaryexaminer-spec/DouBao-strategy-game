@@ -421,6 +421,69 @@
     return !!attacker && !!defender && attacker.owner === game.side && !attacker.hasAttacked && areEnemies(game.teams, attacker.owner, defender.owner) && inUnitRange(typeMeta(attacker.type).range, fromCell, defender);
   }
 
+  // src/core/rng.js
+  var MODULUS = 4294967296;
+  var MULTIPLIER = 1664525;
+  var INCREMENT = 1013904223;
+  function createRng(seed) {
+    let state = seed >>> 0;
+    return function rng() {
+      state = state * MULTIPLIER + INCREMENT >>> 0;
+      return state / MODULUS;
+    };
+  }
+
+  // src/core/movement.js
+  function inBounds2(x, y, w, h) {
+    return x >= 0 && y >= 0 && x < w && y < h;
+  }
+  function adjacent8(x, y, w, h) {
+    return [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]].map(([dx, dy]) => ({ x: x + dx, y: y + dy })).filter((cell) => inBounds2(cell.x, cell.y, w, h));
+  }
+  function getUnit(game, x, y) {
+    return game.units.find((entry) => entry.x === x && entry.y === y) || null;
+  }
+  function movementCost(game, unitEntry, x, y) {
+    return typeMeta(unitEntry.type).domain === "sea" ? 1 : TERRAIN[game.terrain[y][x]].cost;
+  }
+  function passable(game, unitEntry, x, y) {
+    if (!inBounds2(x, y, game.w, game.h) || getUnit(game, x, y)) {
+      return false;
+    }
+    const domain = typeMeta(unitEntry.type).domain;
+    if (domain === "sea") {
+      return game.terrain[y][x] === "water";
+    }
+    return game.terrain[y][x] !== "water" && game.terrain[y][x] !== "mountain";
+  }
+  function movementNeighbors(game, unitEntry, currentCost, x, y) {
+    return adjacent8(x, y, game.w, game.h);
+  }
+  function reachable(game, unitEntry) {
+    const seen = /* @__PURE__ */ new Map([[cellKey(unitEntry.x, unitEntry.y), 0]]);
+    const queue = [{ x: unitEntry.x, y: unitEntry.y, cost: 0 }];
+    while (queue.length) {
+      const current = queue.shift();
+      for (const next of movementNeighbors(game, unitEntry, current.cost, current.x, current.y)) {
+        if (!passable(game, unitEntry, next.x, next.y)) {
+          continue;
+        }
+        const step = movementCost(game, unitEntry, next.x, next.y);
+        const diagonal = next.x !== current.x && next.y !== current.y;
+        const cost = current.cost + (diagonal ? step * Math.SQRT2 : step);
+        const key = cellKey(next.x, next.y);
+        if (cost > unitEntry.move) {
+          continue;
+        }
+        if (!seen.has(key) || cost < seen.get(key)) {
+          seen.set(key, cost);
+          queue.push({ x: next.x, y: next.y, cost });
+        }
+      }
+    }
+    return seen;
+  }
+
   // src/main.js
   (() => {
     "use strict";
@@ -445,14 +508,14 @@
       shipyardCargo: ["none", "none", "none", "none", "none"],
       engineerCargo: ["none", "none", "none", "none", "none"]
     };
-    function inBounds2(x, y) {
+    function inBounds3(x, y) {
       return x >= 0 && y >= 0 && x < W && y < H;
     }
     function adjacent4(x, y) {
-      return [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: x + dx, y: y + dy })).filter((cell) => inBounds2(cell.x, cell.y));
+      return [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: x + dx, y: y + dy })).filter((cell) => inBounds3(cell.x, cell.y));
     }
-    function adjacent8(x, y) {
-      return [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]].map(([dx, dy]) => ({ x: x + dx, y: y + dy })).filter((cell) => inBounds2(cell.x, cell.y));
+    function adjacent82(x, y) {
+      return [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]].map(([dx, dy]) => ({ x: x + dx, y: y + dy })).filter((cell) => inBounds3(cell.x, cell.y));
     }
     function ownerColor(owner) {
       if (game?.ownerColors?.[owner]) {
@@ -561,16 +624,9 @@
     async function fastBatch(cap = 150, rounds = 10, seed = 20260804) {
       const runs = [];
       const origRandom = Math.random;
-      const makeRng = (value) => {
-        let state = value >>> 0;
-        return () => {
-          state = state * 1664525 + 1013904223 >>> 0;
-          return state / 4294967296;
-        };
-      };
       try {
         for (let i = 0; i < rounds; i++) {
-          Math.random = makeRng(seed + i * 2654435761);
+          Math.random = createRng(seed + i * 2654435761);
           fastSim = true;
           newGame();
           const result = await fastRun(cap);
@@ -908,7 +964,7 @@
       camp.uncapturable = true;
       return camp;
     }
-    function getUnit(x, y) {
+    function getUnit2(x, y) {
       return game.units.find((entry) => entry.x === x && entry.y === y);
     }
     function unitsAt(x, y) {
@@ -918,13 +974,13 @@
       return game.sites.find((entry) => entry.x === x && entry.y === y);
     }
     function isLandTile(x, y) {
-      return inBounds2(x, y) && game.terrain[y][x] !== "water" && game.terrain[y][x] !== "mountain";
+      return inBounds3(x, y) && game.terrain[y][x] !== "water" && game.terrain[y][x] !== "mountain";
     }
     function isWaterTile(x, y) {
-      return inBounds2(x, y) && game.terrain[y][x] === "water";
+      return inBounds3(x, y) && game.terrain[y][x] === "water";
     }
     function isCoastalWater(x, y) {
-      return isWaterTile(x, y) && adjacent8(x, y).some((cell) => isLandTile(cell.x, cell.y));
+      return isWaterTile(x, y) && adjacent82(x, y).some((cell) => isLandTile(cell.x, cell.y));
     }
     function isDeepWater(x, y) {
       if (!isWaterTile(x, y)) {
@@ -1092,46 +1148,6 @@
     function ownerExists(owner) {
       return game.units.some((entry) => entry.owner === owner) || game.sites.some((entry) => entry.owner === owner);
     }
-    function movementCost(unitEntry, x, y) {
-      return typeMeta(unitEntry.type).domain === "sea" ? 1 : TERRAIN[game.terrain[y][x]].cost;
-    }
-    function passable(unitEntry, x, y) {
-      if (!inBounds2(x, y) || getUnit(x, y)) {
-        return false;
-      }
-      const domain = typeMeta(unitEntry.type).domain;
-      if (domain === "sea") {
-        return game.terrain[y][x] === "water";
-      }
-      return game.terrain[y][x] !== "water" && game.terrain[y][x] !== "mountain";
-    }
-    function movementNeighbors(unitEntry, currentCost, x, y) {
-      return adjacent8(x, y);
-    }
-    function reachable(unitEntry) {
-      const seen = /* @__PURE__ */ new Map([[cellKey(unitEntry.x, unitEntry.y), 0]]);
-      const queue = [{ x: unitEntry.x, y: unitEntry.y, cost: 0 }];
-      while (queue.length) {
-        const current = queue.shift();
-        for (const next of movementNeighbors(unitEntry, current.cost, current.x, current.y)) {
-          if (!passable(unitEntry, next.x, next.y)) {
-            continue;
-          }
-          const step = movementCost(unitEntry, next.x, next.y);
-          const diagonal = next.x !== current.x && next.y !== current.y;
-          const cost = current.cost + (diagonal ? step * Math.SQRT2 : step);
-          const key = cellKey(next.x, next.y);
-          if (cost > unitEntry.move) {
-            continue;
-          }
-          if (!seen.has(key) || cost < seen.get(key)) {
-            seen.set(key, cost);
-            queue.push({ x: next.x, y: next.y, cost });
-          }
-        }
-      }
-      return seen;
-    }
     function log(text, kind = "") {
       game.logs.push({ text, kind });
       if (game.logs.length > 80) {
@@ -1246,7 +1262,7 @@
       checkEnd();
     }
     function moveUnit(unitEntry, x, y) {
-      const cost = reachable(unitEntry).get(cellKey(x, y));
+      const cost = reachable(game, unitEntry).get(cellKey(x, y));
       if (cost === void 0 || unitEntry.hasAttacked) {
         return false;
       }
@@ -1315,7 +1331,7 @@
       return score;
     }
     function autoUnloadAdjacent(transport) {
-      const cells = adjacent8(transport.x, transport.y).filter((cell) => canUnloadTransport(transport, cell.x, cell.y));
+      const cells = adjacent82(transport.x, transport.y).filter((cell) => canUnloadTransport(transport, cell.x, cell.y));
       if (!cells.length) {
         return false;
       }
@@ -1464,7 +1480,7 @@
         if (siteEntry?.kind === "city" && !areAllies2(siteEntry.owner, unitEntry.owner)) {
           return true;
         }
-        for (const next of adjacent8(current.x, current.y)) {
+        for (const next of adjacent82(current.x, current.y)) {
           if (!isLandTile(next.x, next.y)) {
             continue;
           }
@@ -1648,7 +1664,7 @@
       const cargoTypes = type === "transport" ? normalizeCargoTypes(options.cargoTypes) : [];
       const totalCost = type === "transport" ? transportCost(cargoTypes) : typeMeta(type).cost;
       const builtUnits = type === "transport" ? 1 + cargoTypes.length : 1;
-      if (!siteEntry || siteEntry.owner !== owner || !buildableTypes(siteEntry).includes(type) || getUnit(siteEntry.x, siteEntry.y) || game.goldByOwner[owner] < totalCost) {
+      if (!siteEntry || siteEntry.owner !== owner || !buildableTypes(siteEntry).includes(type) || getUnit2(siteEntry.x, siteEntry.y) || game.goldByOwner[owner] < totalCost) {
         return false;
       }
       if (atUnitCap(owner, typeMeta(type).domain) || buildBudgetLeft(owner) < builtUnits) {
@@ -1680,7 +1696,7 @@
       return true;
     }
     function fullHealSite(owner, siteEntry) {
-      const occupant = getUnit(siteEntry.x, siteEntry.y);
+      const occupant = getUnit2(siteEntry.x, siteEntry.y);
       const cost = siteEntry.kind === "city" || siteEntry.kind === "camp" ? 5 : siteEntry.kind === "shipyard" ? 6 : 7;
       if (!siteEntry || siteEntry.owner !== owner || !occupant || occupant.owner !== owner || game.goldByOwner[owner] < cost) {
         return false;
@@ -1692,7 +1708,7 @@
     }
     function aiRepair(owner) {
       for (const siteEntry of game.sites.filter((entry) => entry.owner === owner)) {
-        const occupant = getUnit(siteEntry.x, siteEntry.y);
+        const occupant = getUnit2(siteEntry.x, siteEntry.y);
         if (!occupant || occupant.owner !== owner || occupant.hp >= occupant.maxHp) {
           continue;
         }
@@ -1710,14 +1726,14 @@
       unitEntry.hasAttacked = true;
     }
     function engineerBuildCells(unitEntry) {
-      return adjacent8(unitEntry.x, unitEntry.y).filter((cell) => isWaterTile(cell.x, cell.y) && !getUnit(cell.x, cell.y));
+      return adjacent82(unitEntry.x, unitEntry.y).filter((cell) => isWaterTile(cell.x, cell.y) && !getUnit2(cell.x, cell.y));
     }
     function canBuildCamp(unitEntry) {
       return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && isLandTile(unitEntry.x, unitEntry.y) && !getSite2(unitEntry.x, unitEntry.y) && game.goldByOwner[unitEntry.owner] >= CAMP_COST && campCount(unitEntry.owner) < MAX_CAMPS_PER_SIDE;
     }
     function canEngineerLaunch(unitEntry, type, cell, cargoTypes = []) {
       const totalCost = type === "transport" ? transportCost(cargoTypes) : typeMeta(type).cost;
-      return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && !!cell && diagonalDist(unitEntry, cell) === 1 && isWaterTile(cell.x, cell.y) && !getUnit(cell.x, cell.y) && game.goldByOwner[unitEntry.owner] >= totalCost;
+      return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && !!cell && diagonalDist(unitEntry, cell) === 1 && isWaterTile(cell.x, cell.y) && !getUnit2(cell.x, cell.y) && game.goldByOwner[unitEntry.owner] >= totalCost;
     }
     function buildCamp(unitEntry) {
       if (!canBuildCamp(unitEntry) || campCount(unitEntry.owner) >= MAX_CAMPS_PER_SIDE) {
@@ -1770,8 +1786,8 @@
       const activeUnit = selectedUnit();
       const activeSite = selectedSite();
       const canMoveNow = activeUnit && !activeUnit.hasAttacked && activeUnit.move > 0;
-      const moves = canMoveNow && game.side === "player" ? reachable(activeUnit) : /* @__PURE__ */ new Map();
-      const unloadHints = activeUnit && typeMeta(activeUnit.type).transport && activeUnit.cargo.length ? adjacent8(activeUnit.x, activeUnit.y).filter((cell) => canUnloadTransport(activeUnit, cell.x, cell.y)) : [];
+      const moves = canMoveNow && game.side === "player" ? reachable(game, activeUnit) : /* @__PURE__ */ new Map();
+      const unloadHints = activeUnit && typeMeta(activeUnit.type).transport && activeUnit.cargo.length ? adjacent82(activeUnit.x, activeUnit.y).filter((cell) => canUnloadTransport(activeUnit, cell.x, cell.y)) : [];
       const engineerHints = game.pendingOrder?.kind === "engineer-launch" && activeUnit?.id === game.pendingOrder.builderId ? engineerBuildCells(activeUnit) : [];
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
@@ -2020,7 +2036,7 @@
       $("buildBody").classList.toggle("hidden", !showSite);
       if (showSite) {
         const siteEntry = activeSite;
-        const occupant = getUnit(siteEntry.x, siteEntry.y);
+        const occupant = getUnit2(siteEntry.x, siteEntry.y);
         const cost = siteEntry.kind === "city" || siteEntry.kind === "camp" ? 5 : siteEntry.kind === "shipyard" ? 6 : 7;
         $("cityName").textContent = siteEntry.name;
         $("cityTier").textContent = `${tierName(siteEntry.tier)}${siteMeta(siteEntry.kind).name}`;
@@ -2035,7 +2051,7 @@
         const types = buildableTypes(siteEntry);
         $("buildGrid").innerHTML = types.length ? types.map((type) => {
           const costText = type === "transport" ? transportCost(uiState.shipyardCargo) : typeMeta(type).cost;
-          const disabled = !manageable || game.goldByOwner.player < costText || getUnit(siteEntry.x, siteEntry.y);
+          const disabled = !manageable || game.goldByOwner.player < costText || getUnit2(siteEntry.x, siteEntry.y);
           const suffix = type === "transport" ? `<small> 预载：${describeCargo(uiState.shipyardCargo)}</small>` : `<small> ${domainName(typeMeta(type).domain)} ${tierName(typeMeta(type).level)}</small>`;
           return `<button class="btn build" data-type="${type}" ${disabled ? "disabled" : ""}><span>${typeMeta(type).icon} ${typeMeta(type).name}${suffix}</span><span class="cost">${costText} 🪙</span></button>`;
         }).join("") : '<div class="muted">该据点不能生产单位。</div>';
@@ -2064,7 +2080,7 @@
       game.selected = {
         kind,
         ref,
-        unit: kind === "unit" ? ref : getUnit(ref.x, ref.y),
+        unit: kind === "unit" ? ref : getUnit2(ref.x, ref.y),
         site: kind === "site" ? ref : getSite2(ref.x, ref.y)
       };
       refresh();
@@ -2083,10 +2099,10 @@
         return;
       }
       const cell = tileFromEvent(event);
-      if (!inBounds2(cell.x, cell.y)) {
+      if (!inBounds3(cell.x, cell.y)) {
         return;
       }
-      const targetUnit = getUnit(cell.x, cell.y);
+      const targetUnit = getUnit2(cell.x, cell.y);
       const targetSite = getSite2(cell.x, cell.y);
       const selectedUnit2 = game.selected?.kind === "unit" ? game.selected.ref : null;
       const ownUnit = selectedUnit2 && selectedUnit2.owner === "player" ? selectedUnit2 : null;
@@ -2395,7 +2411,7 @@
       const ports = game.sites.filter((entry) => entry.owner === owner && entry.kind === "shipyard");
       let spawned = 0;
       for (const port of ports) {
-        if (spawned >= count || getUnit(port.x, port.y)) {
+        if (spawned >= count || getUnit2(port.x, port.y)) {
           continue;
         }
         game.units.push(unit(spawned === 0 ? "warship" : "transport", owner, port.x, port.y));
@@ -2435,7 +2451,7 @@
     function bestRetreatCell(owner, unitEntry, blockedSite) {
       const supports = supportSites(unitEntry);
       const home = supports.sort((a, b) => dist(a, unitEntry) - dist(b, unitEntry))[0] || null;
-      const cells = [...reachable(unitEntry).keys()].map((key) => {
+      const cells = [...reachable(game, unitEntry).keys()].map((key) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y };
       });
@@ -2632,7 +2648,7 @@
       };
     }
     function strategicPassable(unitEntry, x, y) {
-      if (!inBounds2(x, y)) {
+      if (!inBounds3(x, y)) {
         return false;
       }
       const domain = typeMeta(unitEntry.type).domain;
@@ -2661,7 +2677,7 @@
       while (head < queue.length) {
         const current = queue[head++];
         const nextCost = current.cost + 1;
-        for (const next of adjacent8(current.x, current.y)) {
+        for (const next of adjacent82(current.x, current.y)) {
           if (!strategicPassable(unitEntry, next.x, next.y)) {
             continue;
           }
@@ -2702,7 +2718,7 @@
     function unitRoleCellBonus(owner, unitEntry, cell, intent) {
       const type = unitEntry.type;
       const siteEntry = getSite2(cell.x, cell.y);
-      const coastal = adjacent8(cell.x, cell.y).some((next) => isWaterTile(next.x, next.y));
+      const coastal = adjacent82(cell.x, cell.y).some((next) => isWaterTile(next.x, next.y));
       let score = 0;
       if (type === "scout") {
         score += cityEconomyValue(siteEntry || { kind: "none", owner }, owner) * 0.35;
@@ -2774,7 +2790,7 @@
       const diffCfg = DIFF[profile.diff];
       const aggCfg = AGG[profile.agg];
       const state = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
-      const cells = [...reachable(unitEntry).entries()].map(([key, cost]) => {
+      const cells = [...reachable(game, unitEntry).entries()].map(([key, cost]) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y, cost };
       });
@@ -2876,7 +2892,7 @@
       let produced = 0;
       while (produced < productionBudget) {
         const options = [];
-        for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && !getUnit(entry.x, entry.y))) {
+        for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && !getUnit2(entry.x, entry.y))) {
           for (const type of buildableTypes(siteEntry)) {
             if (atUnitCap(owner, typeMeta(type).domain)) {
               continue;
@@ -2912,7 +2928,7 @@
     }
     function moveToward(unitEntry, target) {
       const distanceField = buildDistanceField(unitEntry, target);
-      const cells = [...reachable(unitEntry).keys()].map((key) => {
+      const cells = [...reachable(game, unitEntry).keys()].map((key) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y };
       }).filter((cell) => cell.x !== unitEntry.x || cell.y !== unitEntry.y);
@@ -2931,7 +2947,7 @@
       const distanceField = buildDistanceField(transport, target);
       const current = { x: transport.x, y: transport.y };
       const currentDist = distanceField?.get(cellKey(current.x, current.y)) ?? dist(current, target);
-      const cells = [...reachable(transport).keys()].map((key) => {
+      const cells = [...reachable(game, transport).keys()].map((key) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y };
       });
@@ -2958,7 +2974,7 @@
       const cells = [];
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
-          if (isLandTile(x, y) && adjacent8(x, y).some((cell) => isWaterTile(cell.x, cell.y))) {
+          if (isLandTile(x, y) && adjacent82(x, y).some((cell) => isWaterTile(cell.x, cell.y))) {
             cells.push({ x, y, score: strategicLandingScore(owner, { x, y }) });
           }
         }
@@ -3045,7 +3061,7 @@
       const enemies = game.units.filter((entry) => areEnemies2(entry.owner, owner));
       const upperEnemies = enemies.filter((entry) => entry.y < midY);
       const focus = (upperEnemies.length ? upperEnemies : enemies).sort((a, b) => dist(a, unitEntry) - dist(b, unitEntry))[0];
-      const cells = [...reachable(unitEntry).keys()].map((key) => {
+      const cells = [...reachable(game, unitEntry).keys()].map((key) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y };
       });
@@ -3063,7 +3079,7 @@
     function bridgeheadProduce(owner) {
       const prefer = ["guard", "spearman", "crossbow", "archer", "swordsman", "militia"];
       let built = 0;
-      for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && !getUnit(entry.x, entry.y))) {
+      for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && !getUnit2(entry.x, entry.y))) {
         if (built >= 2) {
           break;
         }
@@ -3117,7 +3133,7 @@
       const enemies = game.units.filter((entry) => areEnemies2(entry.owner, owner));
       const seaFocus = enemies.filter((entry) => (typeMeta(entry.type).domain === "sea" || entry.type === "transport") && entry.y < line);
       const focus = (seaFocus.length ? seaFocus : enemies).sort((a, b) => dist(a, warship) - dist(b, warship))[0];
-      const cells = [...reachable(warship).keys()].map((key) => {
+      const cells = [...reachable(game, warship).keys()].map((key) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y };
       });
@@ -3134,7 +3150,7 @@
     }
     function navalLandHoldCell(owner, unitEntry) {
       const homes = game.sites.filter((entry) => entry.owner === owner && (entry.kind === "city" || entry.kind.startsWith("barracks")));
-      const cells = [...reachable(unitEntry).keys()].map((key) => {
+      const cells = [...reachable(game, unitEntry).keys()].map((key) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y };
       });
@@ -3153,7 +3169,7 @@
     }
     function navalProduce(owner) {
       let built = 0;
-      for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && entry.kind === "shipyard" && !getUnit(entry.x, entry.y))) {
+      for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && entry.kind === "shipyard" && !getUnit2(entry.x, entry.y))) {
         if (built >= 2) {
           break;
         }
@@ -3162,7 +3178,7 @@
         }
       }
       const prefer = ["guard", "spearman", "crossbow", "archer"];
-      for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && entry.kind === "city" && !getUnit(entry.x, entry.y))) {
+      for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && entry.kind === "city" && !getUnit2(entry.x, entry.y))) {
         if (built >= 3) {
           break;
         }
@@ -3338,6 +3354,8 @@
       currentSaveKey = null;
       distFieldCache.clear();
       game = {
+        w: W,
+        h: H,
         terrain: terrainFor($("mapSelect").value, $("complexitySelect").value, W, H),
         units: [],
         sites: [],

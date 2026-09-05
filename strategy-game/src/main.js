@@ -13,6 +13,8 @@ import { saveStore } from './io/storage.js';
 import { terrainFor } from './core/mapgen.js';
 import { teamOf as teamOfPure, areAllies as areAlliesPure, areEnemies as areEnemiesPure } from './core/teams.js';
 import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from './core/combat.js';
+import { createRng } from './core/rng.js';
+import { reachable } from './core/movement.js';
 
 (() => {
   'use strict';
@@ -167,16 +169,9 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
   async function fastBatch(cap = 150, rounds = 10, seed = 20260804) {
     const runs = [];
     const origRandom = Math.random;
-    const makeRng = value => {
-      let state = value >>> 0;
-      return () => {
-        state = (state * 1664525 + 1013904223) >>> 0;
-        return state / 4294967296;
-      };
-    };
     try {
       for (let i = 0; i < rounds; i++) {
-        Math.random = makeRng(seed + i * 2654435761);
+        Math.random = createRng(seed + i * 2654435761);
         fastSim = true;
         newGame();
         const result = await fastRun(cap);
@@ -762,52 +757,6 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
     return game.units.some(entry => entry.owner === owner) || game.sites.some(entry => entry.owner === owner);
   }
 
-  function movementCost(unitEntry, x, y) {
-    return typeMeta(unitEntry.type).domain === 'sea' ? 1 : TERRAIN[game.terrain[y][x]].cost;
-  }
-
-  function passable(unitEntry, x, y) {
-    if (!inBounds(x, y) || getUnit(x, y)) {
-      return false;
-    }
-    const domain = typeMeta(unitEntry.type).domain;
-    if (domain === 'sea') {
-      return game.terrain[y][x] === 'water';
-    }
-    return game.terrain[y][x] !== 'water' && game.terrain[y][x] !== 'mountain';
-  }
-
-  function movementNeighbors(unitEntry, currentCost, x, y) {
-    // 8-directional movement, consistent with the diagonal (Chebyshev) adjacency used for attacks and reachability.
-    return adjacent8(x, y);
-  }
-
-  function reachable(unitEntry) {
-    const seen = new Map([[cellKey(unitEntry.x, unitEntry.y), 0]]);
-    const queue = [{ x: unitEntry.x, y: unitEntry.y, cost: 0 }];
-    while (queue.length) {
-      const current = queue.shift();
-      for (const next of movementNeighbors(unitEntry, current.cost, current.x, current.y)) {
-        if (!passable(unitEntry, next.x, next.y)) {
-          continue;
-        }
-        // Diagonal steps cost ~√2 so the reachable area stays round (octagon) instead of a square.
-        const step = movementCost(unitEntry, next.x, next.y);
-        const diagonal = next.x !== current.x && next.y !== current.y;
-        const cost = current.cost + (diagonal ? step * Math.SQRT2 : step);
-        const key = cellKey(next.x, next.y);
-        if (cost > unitEntry.move) {
-          continue;
-        }
-        if (!seen.has(key) || cost < seen.get(key)) {
-          seen.set(key, cost);
-          queue.push({ x: next.x, y: next.y, cost });
-        }
-      }
-    }
-    return seen;
-  }
-
   function log(text, kind = '') {
     game.logs.push({ text, kind });
     if (game.logs.length > 80) {
@@ -929,7 +878,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
   }
 
   function moveUnit(unitEntry, x, y) {
-    const cost = reachable(unitEntry).get(cellKey(x, y));
+    const cost = reachable(game, unitEntry).get(cellKey(x, y));
     if (cost === undefined || unitEntry.hasAttacked) {
       return false;
     }
@@ -1494,7 +1443,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
     const activeUnit = selectedUnit();
     const activeSite = selectedSite();
     const canMoveNow = activeUnit && !activeUnit.hasAttacked && activeUnit.move > 0;
-    const moves = canMoveNow && game.side === 'player' ? reachable(activeUnit) : new Map();
+    const moves = canMoveNow && game.side === 'player' ? reachable(game, activeUnit) : new Map();
     const unloadHints = activeUnit && typeMeta(activeUnit.type).transport && activeUnit.cargo.length ? adjacent8(activeUnit.x, activeUnit.y).filter(cell => canUnloadTransport(activeUnit, cell.x, cell.y)) : [];
     const engineerHints = game.pendingOrder?.kind === 'engineer-launch' && activeUnit?.id === game.pendingOrder.builderId ? engineerBuildCells(activeUnit) : [];
 
@@ -2212,7 +2161,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
   function bestRetreatCell(owner, unitEntry, blockedSite) {
     const supports = supportSites(unitEntry);
     const home = supports.sort((a, b) => dist(a, unitEntry) - dist(b, unitEntry))[0] || null;
-    const cells = [...reachable(unitEntry).keys()].map(key => {
+    const cells = [...reachable(game, unitEntry).keys()].map(key => {
       const [x, y] = key.split(',').map(Number);
       return { x, y };
     });
@@ -2585,7 +2534,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
     const diffCfg = DIFF[profile.diff];
     const aggCfg = AGG[profile.agg];
     const state = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
-    const cells = [...reachable(unitEntry).entries()].map(([key, cost]) => {
+    const cells = [...reachable(game, unitEntry).entries()].map(([key, cost]) => {
       const [x, y] = key.split(',').map(Number);
       return { x, y, cost };
     });
@@ -2728,7 +2677,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
 
   function moveToward(unitEntry, target) {
     const distanceField = buildDistanceField(unitEntry, target);
-    const cells = [...reachable(unitEntry).keys()].map(key => {
+    const cells = [...reachable(game, unitEntry).keys()].map(key => {
       const [x, y] = key.split(',').map(Number);
       return { x, y };
     }).filter(cell => cell.x !== unitEntry.x || cell.y !== unitEntry.y);
@@ -2749,7 +2698,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
     const distanceField = buildDistanceField(transport, target);
     const current = { x: transport.x, y: transport.y };
     const currentDist = distanceField?.get(cellKey(current.x, current.y)) ?? dist(current, target);
-    const cells = [...reachable(transport).keys()].map(key => {
+    const cells = [...reachable(game, transport).keys()].map(key => {
       const [x, y] = key.split(',').map(Number);
       return { x, y };
     });
@@ -2876,7 +2825,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
     const enemies = game.units.filter(entry => areEnemies(entry.owner, owner));
     const upperEnemies = enemies.filter(entry => entry.y < midY);
     const focus = (upperEnemies.length ? upperEnemies : enemies).sort((a, b) => dist(a, unitEntry) - dist(b, unitEntry))[0];
-    const cells = [...reachable(unitEntry).keys()].map(key => {
+    const cells = [...reachable(game, unitEntry).keys()].map(key => {
       const [x, y] = key.split(',').map(Number);
       return { x, y };
     });
@@ -2953,7 +2902,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
     const enemies = game.units.filter(entry => areEnemies(entry.owner, owner));
     const seaFocus = enemies.filter(entry => (typeMeta(entry.type).domain === 'sea' || entry.type === 'transport') && entry.y < line);
     const focus = (seaFocus.length ? seaFocus : enemies).sort((a, b) => dist(a, warship) - dist(b, warship))[0];
-    const cells = [...reachable(warship).keys()].map(key => {
+    const cells = [...reachable(game, warship).keys()].map(key => {
       const [x, y] = key.split(',').map(Number);
       return { x, y };
     });
@@ -2971,7 +2920,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
 
   function navalLandHoldCell(owner, unitEntry) {
     const homes = game.sites.filter(entry => entry.owner === owner && (entry.kind === 'city' || entry.kind.startsWith('barracks')));
-    const cells = [...reachable(unitEntry).keys()].map(key => {
+    const cells = [...reachable(game, unitEntry).keys()].map(key => {
       const [x, y] = key.split(',').map(Number);
       return { x, y };
     });
@@ -3180,6 +3129,8 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
     currentSaveKey = null;
     distFieldCache.clear();
     game = {
+      w: W,
+      h: H,
       terrain: terrainFor($('mapSelect').value, $('complexitySelect').value, W, H),
       units: [],
       sites: [],
