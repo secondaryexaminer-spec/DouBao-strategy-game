@@ -1,0 +1,4 @@
+﻿
+# sim 运行副产物
+sim/last-*.json
+sim/suite-result.json
