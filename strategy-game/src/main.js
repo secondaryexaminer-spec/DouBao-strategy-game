@@ -3118,7 +3118,7 @@ import { reachable } from './core/movement.js';
     const ownerColors = { player: COLOR_PRESETS[$('playerColorSelect').value || 'azure']?.value || '#55a3ff' };
     for (let i = 0; i < aiCount; i++) {
       teams[`ai${i}`] = $(`ai${i}Team`)?.value || TEAMS[(i + 1) % TEAMS.length];
-      aiProfiles[`ai${i}`] = { diff: $(`ai${i}Diff`)?.value || 'medium', agg: $(`ai${i}Agg`)?.value || 'balanced' };
+      aiProfiles[`ai${i}`] = { diff: $(`ai${i}Diff`)?.value || 'medium', agg: $(`ai${i}Agg`)?.value || 'balanced', faction: $(`ai${i}Faction`)?.value || 'hre', nation: $(`ai${i}Nation`)?.value || 'austria' };
       ownerColors[`ai${i}`] = COLOR_PRESETS[$(`ai${i}Color`)?.value || 'crimson']?.value || OWNER_COLORS[i % OWNER_COLORS.length];
     }
     const dimensions = computeDimensions($('sizeSelect').value, $('aspectSelect').value);
@@ -3574,14 +3574,37 @@ import { reachable } from './core/movement.js';
       const colorOptionsMarkup = colorOptions().map(([key, meta]) => `<option value="${key}" ${key === defaults[i % defaults.length] ? 'selected' : ''}>${meta.name}</option>`).join('');
       const defaultTeam = TEAMS[(i + 1) % TEAMS.length];
       const teamOptionsMarkup = TEAMS.map(team => `<option value="${team}" ${team === defaultTeam ? 'selected' : ''}>${team}组</option>`).join('');
+      const aiFactionIds = Object.keys(FACTIONS);
+      const aiDefaultFaction = aiFactionIds[i % aiFactionIds.length];
+      const aiFactionMarkup = aiFactionIds.map(fid => `<option value="${fid}" ${fid === aiDefaultFaction ? 'selected' : ''}>${FACTIONS[fid].name}</option>`).join('');
       return `<tr>
         <td class="pt-name">🤖 AI ${i + 1}</td>
         <td><select id="ai${i}Diff" title="AI 难度"><option value="easy">简单</option><option value="medium" selected>中等</option><option value="brutal">冷酷</option><option value="bridgehead">桥头(测试)</option><option value="naval">海防(测试)</option></select></td>
         <td><select id="ai${i}Color" title="AI 颜色">${colorOptionsMarkup}</select></td>
         <td><select id="ai${i}Team" title="AI 组别">${teamOptionsMarkup}</select></td>
         <td><select id="ai${i}Agg" title="AI 进攻欲"><option value="cautious">谨慎</option><option value="balanced" selected>均衡</option><option value="reckless">冲动</option></select></td>
+        <td><select id="ai${i}Faction" class="ai-faction-select" data-ai="${i}" title="AI 阵营">${aiFactionMarkup}</select></td>
+        <td><select id="ai${i}Nation" title="AI 国家"></select></td>
       </tr>`;
     }).join('');
+    // 初始化每个 AI 的国家列表 + 阵营联动
+    for (let i = 0; i < count; i++) {
+      refreshAINation(i);
+      const el = $('ai' + i + 'Faction');
+      if (el) el.addEventListener('change', () => refreshAINation(i));
+    }
+  }
+
+  function refreshAINation(aiIndex) {
+    const factionId = $('ai' + aiIndex + 'Faction')?.value;
+    const select = $('ai' + aiIndex + 'Nation');
+    if (!factionId || !select) return;
+    select.innerHTML = '';
+    for (const [id, meta] of Object.entries(NATIONS)) {
+      if (meta.faction === factionId) {
+        select.insertAdjacentHTML('beforeend', '<option value="' + id + '">' + meta.name + '</option>');
+      }
+    }
   }
 
   function renderRules() {

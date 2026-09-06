@@ -178,5 +178,28 @@ export function terrainFor(mapId, complexityId, w, h) {
       scatter(terrain, w, h, 'water', Math.max(0, Math.round(w * h * complexity.water / 70)), 1, ['plain']);
     }
   }
+  // 新地形：丘陵、沙漠（随机撒点）
+  scatter(terrain, w, h, 'hill', Math.max(1, Math.round(w * h * complexity.forest / 28)), 1, ['plain']);
+  scatter(terrain, w, h, 'desert', Math.max(0, Math.round(w * h * complexity.water / 45)), 2, ['plain']);
+  // 雪地：地图顶部 15% 寒带区域
+  for (let y = 0; y < Math.floor(h * 0.15); y++) {
+    for (let x = 0; x < w; x++) {
+      if (terrain[y][x] === 'plain' && Math.random() < 0.35) terrain[y][x] = 'snow';
+    }
+  }
+  // 沙地：水域相邻的海岸平原
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (terrain[y][x] !== 'plain') continue;
+      let nearWater = false;
+      for (let dy = -1; dy <= 1 && !nearWater; dy++) {
+        for (let dx = -1; dx <= 1 && !nearWater; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (inBounds(nx, ny, w, h) && terrain[ny][nx] === 'water') nearWater = true;
+        }
+      }
+      if (nearWater && Math.random() < 0.5) terrain[y][x] = 'sand';
+    }
+  }
   return terrain;
 }

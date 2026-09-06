@@ -6,8 +6,9 @@
 - 纯前端回合制策略游戏 v0.1.2；`src/main.js`（约 161KB，重构中）含逻辑；esbuild 打包为 `js/game.js`（IIFE，file:// 可开）。
 - 单位类型（15 种）：陆军 10（民兵/侦察/长枪/剑士/弓箭/弩手/工程师/骑兵/近卫/投石车）+ 海军 5（桨帆船/战船/战舰/驳船/运兵船）。远程 4：投石车、战舰。
 - **阵营系统（阶段1完成）**：5 阵营（神圣罗马帝国/金帐汗国/威尼斯共和国/马穆鲁克苏丹国/大明帝国），15 国家（每阵营 3 国）。constants.js 有 FACTIONS/NATIONS 定义；开始界面有阵营/国家两级下拉框（阵营切换联动国家列表）；game.settings 含 faction/nation；开局日志显示阵营/国家/特色兵种。目前仅玩家可选阵营，AI 暂用通用兵种。
-- 地形（5 种）：草原/森林/山脉(不可通行)/道路/海域。**没有沙漠/沙地/丘陵/雪地**。
+- 地形（9 种）：草原/森林/山脉(不可通行)/道路/海域/**沙漠(cost2)**/**沙地(海岸)**/**丘陵(cost2,def2)**/**雪地(cost2,def1,寒带)**。mapgen.js 自动生成：丘陵/沙漠随机撒点、雪地在地图顶部15%、沙地在水域相邻。
 - 冲锋（charge）：骑兵被动属性，触发条件=本回合未移动+相邻攻击+非反击，效果=charge值加到伤害。不是主动技能。
+- **AI 阵营分配**：每个 AI 可在开始界面选阵营/国家（与玩家相同的两级下拉框，阵营切换联动国家）。aiProfiles 含 faction/nation 字段。目前 AI 阵营仅存储，未影响兵种可用性（等阵营专属兵种实现后过滤）。
 - 无头模拟：`sim/harness.js`（DOM shim）+ `sim/run.js`（批量对局）+ `sim/suite.js`（4 场景平衡回归）。AI 逻辑与浏览器共用同一打包产物，零分叉。
 - git：仓库在 `E:\WorkPlace\DouBao-WorkPlace\strategy-game`（外层），远程已改为 `https://github.com/secondaryexaminer-spec/DouBao-strategy-game.git`。
 - 重构进度：第一阶段抽取中——已抽 `src/core/mapgen.js`（地图生成）、`src/core/teams.js`（阵营判定）、`src/core/combat.js`（战斗计算）、`src/core/rng.js`（确定性 LCG）、`src/core/movement.js`（寻路 reachable/passable）；每次抽取均用同种子模拟验证行为等价。main.js 现约 157KB。game 对象已加 w/h 字段供 core 模块使用。

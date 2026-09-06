@@ -65,7 +65,11 @@ export const TERRAIN = {
   forest: { name: '森林', color: '#356641', cost: 2, def: 2, mark: '♣' },
   mountain: { name: '山脉', color: '#696b68', cost: 99, def: 4, mark: '▲' },
   road: { name: '道路', color: '#a4865c', cost: 1, def: 0, mark: '·' },
-  water: { name: '海域', color: '#2d6f9e', cost: 1, def: 0, mark: '≈' }
+  water: { name: '海域', color: '#2d6f9e', cost: 1, def: 0, mark: '≈' },
+  desert: { name: '沙漠', color: '#c2a968', cost: 2, def: 0, mark: '∴' },
+  sand: { name: '沙地', color: '#e3d29a', cost: 1, def: 0, mark: '·' },
+  hill: { name: '丘陵', color: '#6b8e4e', cost: 2, def: 2, mark: '△' },
+  snow: { name: '雪地', color: '#c8dce8', cost: 2, def: 1, mark: '❄' }
 };
 
 export const MAPS = {
