@@ -40,7 +40,18 @@
     galley: { name: "桨帆船", icon: "🛶", level: 1, hp: 14, atk: 6, def: 3, move: 3, range: 2, cost: 30, domain: "sea", text: "低成本海战单位，适合早期制海。", bonusVs: { transport: 2, barge: 3 } },
     barge: { name: "驳船", icon: "⛴", level: 1, hp: 12, atk: 1, def: 2, move: 4, range: 1, cost: 26, domain: "sea", text: "一次最多搭载三个陆军单位。", transport: 3 },
     battleship: { name: "战舰", icon: "🛳", level: 3, hp: 14, atk: 13, def: 4, move: 3, range: 4, cost: 62, domain: "sea", text: "远程重炮舰，射程远但脆弱。", bonusVs: { transport: 6, barge: 8, warship: 2, galley: 3 } },
-    catapult: { name: "投石车", icon: "🎯", level: 3, hp: 8, atk: 12, def: 1, move: 2, range: 4, cost: 54, domain: "land", text: "远程攻城器械，射程远但极度脆弱。" }
+    catapult: { name: "投石车", icon: "🎯", level: 3, hp: 8, atk: 12, def: 1, move: 2, range: 4, cost: 54, domain: "land", text: "远程攻城器械，射程远但极度脆弱。" },
+    // === 神圣罗马帝国（hre）阵营专属兵种 ===
+    heavyInfantry: { name: "德意志重甲步兵", icon: "🗿", level: 2, hp: 18, atk: 7, def: 6, move: 2, range: 1, cost: 36, domain: "land", faction: "hre", text: "正面铜墙铁壁。" },
+    pikeSquare: { name: "长矛方阵", icon: "🔱", level: 1, hp: 14, atk: 5, def: 6, move: 3, range: 1, cost: 30, domain: "land", faction: "hre", text: "不可被冲锋的密集方阵。", bonusVs: { cavalry: 5 } },
+    imperialCrossbow: { name: "帝国弩手", icon: "🏹", level: 2, hp: 10, atk: 8, def: 2, move: 2, range: 2, cost: 42, domain: "land", faction: "hre", text: "高爆发集火。" },
+    imperialGuard: { name: "帝国近卫军", icon: "💂", level: 3, hp: 22, atk: 8, def: 7, move: 3, range: 1, cost: 56, domain: "land", faction: "hre", text: "守点时防御+3。" },
+    siegeTower: { name: "攻城塔", icon: "🏰", level: 2, hp: 30, atk: 4, def: 3, move: 1, range: 1, cost: 40, domain: "land", faction: "hre", text: "占领据点速度×2。" },
+    heavyCatapult: { name: "重型投石车", icon: "💥", level: 3, hp: 8, atk: 14, def: 1, move: 1, range: 4, cost: 58, domain: "land", faction: "hre", text: "对建筑伤害×1.5。" },
+    // === 神罗国家特色兵种 ===
+    austrianKnight: { name: "奥地利骑士", icon: "🏇", level: 3, hp: 20, atk: 9, def: 6, move: 5, range: 1, cost: 50, domain: "land", faction: "hre", text: "重装冲锋骑兵。", charge: 3 },
+    prussianGrenadier: { name: "普鲁士掷弹兵", icon: "🧨", level: 2, hp: 12, atk: 10, def: 3, move: 3, range: 1, cost: 44, domain: "land", faction: "hre", text: "对据点内单位伤害+3。" },
+    bavarianMountaineer: { name: "巴伐利亚山地弩手", icon: "⛰", level: 2, hp: 10, atk: 7, def: 2, move: 3, range: 2, cost: 40, domain: "land", faction: "hre", text: "山地地形移动不消耗，驻扎山地射程+1。" }
   };
   var SITE_META = {
     city: { name: "城市", icon: "🏛", income: 10, maxTier: 3, upgradeCosts: { 1: 12, 2: 26 }, domain: "land" },
