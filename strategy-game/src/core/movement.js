@@ -19,8 +19,23 @@ function getUnit(game, x, y) {
   return game.units.find(entry => entry.x === x && entry.y === y) || null;
 }
 
+function ownerNation(game, owner) {
+  if (owner === 'player') return game.settings?.nation;
+  return game.aiProfiles?.[owner]?.nation;
+}
+
 export function movementCost(game, unitEntry, x, y) {
-  return typeMeta(unitEntry.type).domain === 'sea' ? 1 : TERRAIN[game.terrain[y][x]].cost;
+  if (typeMeta(unitEntry.type).domain === 'sea') return 1;
+  const terrain = game.terrain[y][x];
+  const baseCost = TERRAIN[terrain].cost;
+  if (baseCost <= 1) return 1;
+  // 国家机制：特定地形移动不消耗（降为1）
+  const nation = ownerNation(game, unitEntry.owner);
+  if (nation === 'whiteHorde' && (terrain === 'desert' || terrain === 'sand')) return 1;
+  if (nation === 'blueHorde' && terrain === 'snow') return 1;
+  if ((nation === 'bavaria' || nation === 'joseon') && terrain === 'hill') return 1;
+  if (nation === 'annam' && terrain === 'forest') return 1;
+  return baseCost;
 }
 
 export function passable(game, unitEntry, x, y) {

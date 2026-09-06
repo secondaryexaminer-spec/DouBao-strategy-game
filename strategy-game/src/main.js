@@ -537,7 +537,8 @@ import { reachable } from './core/movement.js';
 
   function createCamp(owner, x, y) {
     const camp = site('camp', owner, x, y, '临时营地', 2, 0);
-    camp.duration = CAMP_DURATION;
+    const campNat = owner === 'player' ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
+    camp.duration = CAMP_DURATION + (campNat === 'goldenHordeCore' ? 2 : 0);
     camp.uncapturable = true;
     return camp;
   }
@@ -686,7 +687,9 @@ import { reachable } from './core/movement.js';
   }
 
   function effectiveMove(unitEntry) {
-    return unitEntry.baseMove + Math.floor(unitEntry.rank / 2);
+    const nat = unitEntry.owner === 'player' ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
+    const prussiaBonus = nat === 'prussia' ? 1 : 0;
+    return unitEntry.baseMove + Math.floor(unitEntry.rank / 2) + prussiaBonus;
   }
 
   function healMultiplier(unitEntry) {
@@ -713,12 +716,17 @@ import { reachable } from './core/movement.js';
     return typeMeta(transportType).cost + normalizeCargoTypes(cargoTypes, transportType).reduce((sum, type) => sum + typeMeta(type).cost, 0);
   }
 
-  // 雇佣兵：威尼斯造非己方阵营兵种费用+50%
+  // 雇佣兵：威尼斯造非己方联盟兵种费用+50%；拉古萨：生产费用-5%
   function factionAdjustedCost(owner, type, cargoTypes = []) {
     const base = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
     const fac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+    const nat = owner === 'player' ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
     const typeFac = typeMeta(type).faction;
-    const markup = fac === 'venice' && typeFac && typeFac !== 'venice' ? 1.5 : 1;
+    let markup = fac === 'venice' && typeFac && typeFac !== 'venice' ? 1.5 : 1;
+    if (nat === 'ragusa') markup *= 0.95;
+    // 威尼斯本部：造船费用-20%；大明本部：造船/建营费用-10%
+    if (nat === 'veniceCore' && typeMeta(type).domain === 'sea') markup *= 0.8;
+    if (nat === 'mingCore' && (typeMeta(type).domain === 'sea' || type === 'engineer' || type === 'worksEngineer')) markup *= 0.9;
     return Math.round(base * markup);
   }
 
@@ -810,7 +818,9 @@ import { reachable } from './core/movement.js';
     attacker.hasAttacked = true;
     attacker.acted = true;
     if (atkFaction === 'ming' && typeMeta(attacker.type).range > 1) {
-      const splashDamage = Math.max(1, Math.round(result.damage * 0.5));
+      const splashNat = attacker.owner === 'player' ? game.settings?.nation : game.aiProfiles?.[attacker.owner]?.nation;
+      const splashRatio = splashNat === 'mingCore' ? 0.6 : 0.5;
+      const splashDamage = Math.max(1, Math.round(result.damage * splashRatio));
       for (const nearby of game.units.filter(u => u.owner !== attacker.owner && Math.abs(u.x - defender.x) <= 1 && Math.abs(u.y - defender.y) <= 1 && (u.x !== defender.x || u.y !== defender.y))) {
         nearby.hp -= splashDamage;
         log(`${typeMeta(attacker.type).name}的火器齐射溅射到${typeMeta(nearby.type).name}，造成 ${splashDamage} 点伤害。`, 'battle');
@@ -825,11 +835,21 @@ import { reachable } from './core/movement.js';
     if (defender.hp <= 0) {
       incrementStat('kills', attacker.owner, 1 + (defender.cargo?.length || 0));
       grantKills(attacker, 1 + (defender.cargo?.length || 0));
+      // 苏丹禁卫：击杀后回血3
+      if (attacker.type === 'sultanGuard') {
+        attacker.hp = Math.min(attacker.maxHp, attacker.hp + 3);
+      }
       removeUnit(defender);
       log(`${typeMeta(defender.type).name}被消灭。`, 'battle');
-    } else if (result.counter > 0) {
+    } else if (result.counter > 0 && attacker.type !== 'jinyiwei') {
       attacker.hp -= result.counter;
       log(`${typeMeta(defender.type).name}反击，造成 ${result.counter} 点伤害。`, 'battle');
+      // 朝鲜龟船：反弹30%受到的伤害
+      if (defender.type === 'joseonTurtleShip' && defender.hp > 0) {
+        const reflect = Math.max(1, Math.round(result.damage * 0.3));
+        attacker.hp -= reflect;
+        log(`${typeMeta(defender.type).name}的装甲反弹了 ${reflect} 点伤害。`, 'battle');
+      }
       if (attacker.hp <= 0) {
         incrementStat('kills', defender.owner, 1 + (attacker.cargo?.length || 0));
         grantKills(defender, 1 + (attacker.cargo?.length || 0));
@@ -887,6 +907,15 @@ import { reachable } from './core/movement.js';
     const oldTier = siteEntry.tier;
     const oldOwner = siteEntry.owner;
     siteEntry.owner = unitEntry.owner;
+    // 拉古萨：商队占领据点后该据点收入+5
+    if ((unitEntry.type === 'tradeCaravan' || unitEntry.type === 'ragusaCaravan') && !siteEntry._caravanBonus) {
+      siteEntry.income += 5;
+      siteEntry._caravanBonus = true;
+    }
+    // 攻城塔：占领后返还全部移动力（可继续攻击）
+    if (unitEntry.type === 'siegeTower') {
+      unitEntry.move = unitEntry.maxMove;
+    }
     // 据点占领改名：非中立据点被敌对方占领后40%概率改名（按占领者国家命名体系）
     if (oldOwner !== 'neutral' && Math.random() < 0.4) {
       const capturerNation = unitEntry.owner === 'player' ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
@@ -1045,7 +1074,9 @@ import { reachable } from './core/movement.js';
       const nearest = Math.min(...supports.map(siteEntry => dist(siteEntry, unitEntry)));
       if (!unitEntry.lastAttacked) {
         const ratio = (nearest === 0 ? 0.16 : nearest <= 1 ? 0.1 : nearest >= 14 ? 0.02 : Math.max(0.02, 0.1 - (nearest - 1) * 0.08 / 13)) * healMultiplier(unitEntry);
-        unitEntry.hp = Math.min(unitEntry.maxHp, unitEntry.hp + Math.max(1, Math.ceil(unitEntry.maxHp * ratio)));
+        const healNat = unitEntry.owner === 'player' ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
+        const bavariaBonus = healNat === 'bavaria' ? 1 : 0;
+        unitEntry.hp = Math.min(unitEntry.maxHp, unitEntry.hp + Math.max(1, Math.ceil(unitEntry.maxHp * ratio)) + bavariaBonus);
       }
       unitEntry.lastAttacked = false;
     }
@@ -1054,8 +1085,13 @@ import { reachable } from './core/movement.js';
   function grantIncome(owner) {
     const base = game.sites.filter(entry => entry.owner === owner).reduce((sum, entry) => sum + entry.income, 0);
     const incFac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+    const incNation = owner === 'player' ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
     const factionMult = incFac === 'venice' ? 1.25 : 1;
-    const gain = Math.round(base * (game.settings?.incomeMult || 1) * factionMult);
+    // 国家机制：收入加成（加法叠加，避免威尼斯过强）
+    let nationIncomeBonus = 0;
+    if (incNation === 'austria' || incNation === 'egypt') nationIncomeBonus += game.sites.filter(s => s.kind === 'city' && s.owner === owner).length * 2;
+    if (incNation === 'genoa') nationIncomeBonus += Math.round(base * 0.1);
+    const gain = Math.round(base * (game.settings?.incomeMult || 1) * factionMult) + nationIncomeBonus;
     game.goldByOwner[owner] += gain;
     if (gain > 0) {
       log(`${ownerName(owner)}获得 ${gain} 金币收入。`, 'gold');
@@ -1079,7 +1115,7 @@ import { reachable } from './core/movement.js';
       healOwner(owner);
       grantIncome(owner);
       aiRepair(owner);
-      // 征召兵：神罗阵营每个己方城市每回合免费产1个民兵（城市格无单位时）
+      // 征召兵：神罗联盟每个己方城市每回合免费产1个民兵（城市格无单位时）
       const ownerFac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
       if (ownerFac === 'hre') {
         for (const siteEntry of game.sites.filter(s => s.kind === 'city' && s.owner === owner)) {
@@ -1088,7 +1124,7 @@ import { reachable } from './core/movement.js';
           }
         }
       }
-      // 卫所制：大明阵营每3回合每个己方城市/军营产1个民兵
+      // 卫所制：大明联盟每3回合每个己方城市/军营产1个民兵
       if (ownerFac === 'ming' && game.turn % 3 === 0) {
         for (const siteEntry of game.sites.filter(s => (s.kind === 'city' || s.kind === 'barracks') && s.owner === owner)) {
           if (!getUnit(siteEntry.x, siteEntry.y)) {
@@ -3282,7 +3318,7 @@ import { reachable } from './core/movement.js';
     $('statsSummary').innerHTML = '';
     recordStatSnapshot('deploy');
     log(`版本 0.1.2 战局开始：${MAPS[game.settings.map].name} · ${SIZES[game.settings.size].name} · ${ASPECTS[game.settings.aspect].name} ${W}×${H} · ${game.sites.filter(entry => entry.kind === 'city').length} 座城市 · ${game.sites.filter(entry => entry.kind === 'shipyard').length} 座船坞。`, 'system');
-    log(`玩家阵营：${FACTIONS[game.settings.faction]?.name || game.settings.faction} · ${NATIONS[game.settings.nation]?.name || game.settings.nation}（特色兵种：${NATIONS[game.settings.nation]?.unique || '待定'}）`, 'system');
+    log(`玩家联盟：${FACTIONS[game.settings.faction]?.name || game.settings.faction} · ${NATIONS[game.settings.nation]?.name || game.settings.nation}（特色兵种：${NATIONS[game.settings.nation]?.unique || '待定'}）`, 'system');
     const focusCity = game.sites.find(entry => entry.kind === 'city' && entry.owner === (spectator ? owners[0] : 'player'));
     if (focusCity) {
       centerCamOn(focusCity.x, focusCity.y);
@@ -3665,11 +3701,11 @@ import { reachable } from './core/movement.js';
         <td><select id="ai${i}Color" title="AI 颜色">${colorOptionsMarkup}</select></td>
         <td><select id="ai${i}Team" title="AI 组别">${teamOptionsMarkup}</select></td>
         <td><select id="ai${i}Agg" title="AI 进攻欲"><option value="cautious">谨慎</option><option value="balanced" selected>均衡</option><option value="reckless">冲动</option></select></td>
-        <td><select id="ai${i}Faction" class="ai-faction-select" data-ai="${i}" title="AI 阵营">${aiFactionMarkup}</select></td>
+        <td><select id="ai${i}Faction" class="ai-faction-select" data-ai="${i}" title="AI 联盟">${aiFactionMarkup}</select></td>
         <td><select id="ai${i}Nation" title="AI 国家"></select></td>
       </tr>`;
     }).join('');
-    // 初始化每个 AI 的国家列表 + 阵营联动
+    // 初始化每个 AI 的国家列表 + 联盟联动
     for (let i = 0; i < count; i++) {
       refreshAINation(i);
       const el = $('ai' + i + 'Faction');
@@ -3694,7 +3730,7 @@ import { reachable } from './core/movement.js';
       <div class="rule-version">
         <h3 class="info-section-title">基础玩法</h3>
         <div class="rule-grid">
-          <section class="rule-block"><h3>回合流程</h3><ul><li>每个阵营依次行动；回合开始时统一重置移动、结算收入、回血与维修。</li><li>单位可先机动再攻击，但每回合只能攻击一次；攻击后本回合不能再机动。</li><li>玩家和 AI 完全共用同一套伤害、生产、升级、维修和运输规则。</li></ul></section>
+          <section class="rule-block"><h3>回合流程</h3><ul><li>每个联盟依次行动；回合开始时统一重置移动、结算收入、回血与维修。</li><li>单位可先机动再攻击，但每回合只能攻击一次；攻击后本回合不能再机动。</li><li>玩家和 AI 完全共用同一套伤害、生产、升级、维修和运输规则。</li></ul></section>
           <section class="rule-block"><h3>三种模式</h3><ul><li>征服：占领全部城市，并消灭全部敌对工程师后获胜。</li><li>遭遇战：敌对组全部野战部队被消灭时获胜。</li><li>守城：坚持到第12回合且仍保有己方关键城市时获胜。</li></ul></section>
           <section class="rule-block"><h3>移动与地形</h3><ul><li>陆军只能在陆地移动，不能进入海域与山脉。</li><li>海军只能在海域行动，船坞与海上堡垒也属于海上据点。</li><li>森林提供额外防御但增加移动消耗，道路降低机动成本。</li></ul></section>
           <section class="rule-block"><h3>战斗与反击</h3><ul><li>伤害由兵种攻防、当前生命、地形、驻防和克制共同决定。</li><li>只要射程覆盖，防守方就能反击；先手不再拥有单方面碾压优势。</li><li>长枪兵克制骑兵，战船克制运兵船，骑兵满机动接战时获得冲锋加成。</li></ul></section>
@@ -3746,7 +3782,7 @@ import { reachable } from './core/movement.js';
       $('playerColorSelect').insertAdjacentHTML('beforeend', `<option value="${id}" ${id === 'azure' ? 'selected' : ''}>${meta.name}</option>`);
     }
     for (let count = 0; count <= 6; count++) {
-      $('startUnitsSelect').insertAdjacentHTML('beforeend', `<option value="${count}" ${count === 4 ? 'selected' : ''}>${count} 个 / 阵营</option>`);
+      $('startUnitsSelect').insertAdjacentHTML('beforeend', `<option value="${count}" ${count === 4 ? 'selected' : ''}>${count} 个 / 联盟</option>`);
     }
     for (const [id, meta] of Object.entries(SIZES)) {
       $('sizeSelect').insertAdjacentHTML('beforeend', `<option value="${id}" ${id === 'medium' ? 'selected' : ''}>${meta.name}</option>`);

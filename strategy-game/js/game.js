@@ -41,57 +41,57 @@
     barge: { name: "驳船", icon: "⛴", level: 1, hp: 12, atk: 1, def: 2, move: 4, range: 1, cost: 26, domain: "sea", text: "一次最多搭载三个陆军单位。", transport: 3 },
     battleship: { name: "战舰", icon: "🛳", level: 3, hp: 14, atk: 13, def: 4, move: 3, range: 4, cost: 62, domain: "sea", text: "远程重炮舰，射程远但脆弱。", bonusVs: { transport: 6, barge: 8, warship: 2, galley: 3 } },
     catapult: { name: "投石车", icon: "🎯", level: 3, hp: 8, atk: 12, def: 1, move: 2, range: 4, cost: 54, domain: "land", text: "远程攻城器械，射程远但极度脆弱。" },
-    // === 神圣罗马帝国（hre）阵营专属兵种 ===
+    // === 神圣罗马帝国（hre）联盟专属兵种 ===
     heavyInfantry: { name: "德意志重甲步兵", icon: "🗿", level: 2, hp: 18, atk: 7, def: 6, move: 2, range: 1, cost: 36, domain: "land", faction: "hre", text: "正面铜墙铁壁。" },
     pikeSquare: { name: "长矛方阵", icon: "🔱", level: 1, hp: 14, atk: 5, def: 6, move: 3, range: 1, cost: 30, domain: "land", faction: "hre", text: "不可被冲锋的密集方阵。", bonusVs: { cavalry: 5 } },
     imperialCrossbow: { name: "帝国弩手", icon: "🏹", level: 2, hp: 10, atk: 8, def: 2, move: 2, range: 2, cost: 42, domain: "land", faction: "hre", text: "高爆发集火。" },
     imperialGuard: { name: "帝国近卫军", icon: "💂", level: 3, hp: 22, atk: 8, def: 7, move: 3, range: 1, cost: 56, domain: "land", faction: "hre", text: "守点时防御+3。" },
     siegeTower: { name: "攻城塔", icon: "🏰", level: 2, hp: 30, atk: 4, def: 3, move: 1, range: 1, cost: 40, domain: "land", faction: "hre", text: "占领据点速度×2。" },
-    heavyCatapult: { name: "重型投石车", icon: "💥", level: 3, hp: 8, atk: 14, def: 1, move: 1, range: 4, cost: 58, domain: "land", faction: "hre", text: "对建筑伤害×1.5。" },
+    heavyCatapult: { name: "重型投石车", icon: "💥", level: 3, hp: 8, atk: 14, def: 1, move: 1, range: 4, cost: 58, domain: "land", faction: "hre", text: "对据点驻军伤害+3。" },
     // === 神罗国家特色兵种 ===
     austrianKnight: { name: "奥地利骑士", icon: "🏇", level: 3, hp: 20, atk: 9, def: 6, move: 5, range: 1, cost: 50, domain: "land", faction: "hre", nation: "austria", text: "重装冲锋骑兵。", charge: 3 },
     prussianGrenadier: { name: "普鲁士掷弹兵", icon: "🧨", level: 2, hp: 12, atk: 10, def: 3, move: 3, range: 1, cost: 44, domain: "land", faction: "hre", nation: "prussia", text: "对据点内单位伤害+3。" },
     bavarianMountaineer: { name: "巴伐利亚山地弩手", icon: "⛰", level: 2, hp: 10, atk: 7, def: 2, move: 3, range: 2, cost: 40, domain: "land", faction: "hre", nation: "bavaria", text: "山地地形移动不消耗，驻扎山地射程+1。" },
-    // === 金帐汗国（goldenHorde）阵营专属兵种 ===
+    // === 金帐汗国（goldenHorde）联盟专属兵种 ===
     lightCavalry: { name: "轻骑兵", icon: "🐎", level: 1, hp: 12, atk: 6, def: 2, move: 6, range: 1, cost: 28, domain: "land", faction: "goldenHorde", text: "高机动骚扰与追击" },
     hordeCavalry: { name: "汗国骑兵", icon: "🐴", level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 42, domain: "land", faction: "goldenHorde", text: "通用机动打击", charge: 2 },
-    horseArcher: { name: "骑射手", icon: "🥷", level: 2, hp: 11, atk: 6, def: 2, move: 4, range: 2, cost: 38, domain: "land", faction: "goldenHorde", text: "移动后可攻击，打完就跑" },
+    horseArcher: { name: "骑射手", icon: "🥷", level: 2, hp: 11, atk: 6, def: 2, move: 4, range: 2, cost: 38, domain: "land", faction: "goldenHorde", text: "高机动骑射，打完就跑" },
     nomadArcher: { name: "游牧弓手", icon: "🪃", level: 1, hp: 9, atk: 5, def: 1, move: 3, range: 2, cost: 30, domain: "land", faction: "goldenHorde", text: "边走边打的轻装弓手" },
     fastGalley: { name: "快速桨帆船", icon: "🚤", level: 1, hp: 12, atk: 7, def: 2, move: 5, range: 2, cost: 32, domain: "sea", faction: "goldenHorde", text: "海上游击，高机动低血量" },
-    nomadChariot: { name: "游牧战车", icon: "🛞", level: 2, hp: 14, atk: 8, def: 2, move: 4, range: 2, cost: 46, domain: "land", faction: "goldenHorde", text: "移动攻城，可移动后攻击" },
+    nomadChariot: { name: "游牧战车", icon: "🛞", level: 2, hp: 14, atk: 8, def: 2, move: 4, range: 2, cost: 46, domain: "land", faction: "goldenHorde", text: "移动攻城器械" },
     // === 金帐汗国国家特色兵种 ===
     khanGuard: { name: "可汗亲卫", icon: "🦅", level: 3, hp: 18, atk: 10, def: 5, move: 4, range: 3, cost: 60, domain: "land", faction: "goldenHorde", nation: "goldenHordeCore", text: "重装骑射手，汗国最强单位" },
     camelCavalry: { name: "骆驼骑兵", icon: "🐫", level: 3, hp: 15, atk: 8, def: 4, move: 5, range: 1, cost: 44, domain: "land", faction: "goldenHorde", nation: "whiteHorde", text: "沙漠平原移动不消耗，吓到敌方马匹", bonusVs: { cavalry: 3 } },
     nomadCannon: { name: "游牧重炮", icon: "💣", level: 3, hp: 10, atk: 12, def: 1, move: 3, range: 3, cost: 52, domain: "land", faction: "goldenHorde", nation: "blueHorde", text: "移动攻城，比投石车灵活" },
-    // === 威尼斯共和国（venice）阵营专属兵种 ===
-    marine: { name: "海军陆战队", icon: "🪖", level: 2, hp: 14, atk: 7, def: 4, move: 3, range: 1, cost: 38, domain: "land", faction: "venice", text: "两栖移动，登陆后首回合攻击+3" },
+    // === 威尼斯共和国（venice）联盟专属兵种 ===
+    marine: { name: "海军陆战队", icon: "🪖", level: 2, hp: 14, atk: 7, def: 4, move: 3, range: 1, cost: 38, domain: "land", faction: "venice", text: "两栖登陆作战单位" },
     galleyWarship: { name: "桨帆战舰", icon: "🚣", level: 2, hp: 18, atk: 10, def: 4, move: 4, range: 2, cost: 50, domain: "sea", faction: "venice", text: "标准海战主力" },
     masterEngineer: { name: "大师工程师", icon: "🔧", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 48, domain: "land", faction: "venice", builder: true, text: "造船费用-20%，可建高级营地" },
     venetianBattleship: { name: "威尼斯战舰", icon: "🔥", level: 3, hp: 12, atk: 14, def: 3, move: 3, range: 4, cost: 64, domain: "sea", faction: "venice", text: "海上远程火力压制" },
     tradeCaravan: { name: "商队", icon: "💰", level: 1, hp: 10, atk: 2, def: 2, move: 4, range: 1, cost: 30, domain: "land", faction: "venice", text: "占领据点后该据点收入+3/回合" },
     mercenarySwordsman: { name: "雇佣剑士", icon: "🗡", level: 2, hp: 15, atk: 8, def: 4, move: 3, range: 1, cost: 40, domain: "land", faction: "venice", text: "精锐雇佣兵" },
     // === 威尼斯国家特色兵种 ===
-    venetianGalleon: { name: "威尼斯巨舰", icon: "⚜", level: 3, hp: 20, atk: 16, def: 5, move: 2, range: 5, cost: 70, domain: "sea", faction: "venice", nation: "veniceCore", text: "超远程海军，阵营最强单位" },
+    venetianGalleon: { name: "威尼斯巨舰", icon: "⚜", level: 3, hp: 20, atk: 16, def: 5, move: 2, range: 5, cost: 70, domain: "sea", faction: "venice", nation: "veniceCore", text: "超远程海军，联盟最强单位" },
     genoeseMarine: { name: "热那亚海军弩手", icon: "🔫", level: 2, hp: 10, atk: 8, def: 2, move: 4, range: 3, cost: 44, domain: "sea", faction: "venice", nation: "genoa", text: "可在船上射击的海军远程单位" },
     ragusaCaravan: { name: "拉古萨巨商队", icon: "💎", level: 2, hp: 14, atk: 3, def: 3, move: 4, range: 1, cost: 36, domain: "land", faction: "venice", nation: "ragusa", text: "强化商队，占领据点后收入+5/回合" },
-    // === 马穆鲁克苏丹国（mamluk）阵营专属兵种 ===
+    // === 马穆鲁克苏丹国（mamluk）联盟专属兵种 ===
     mamlukCavalry: { name: "马穆鲁克骑兵", icon: "🦁", level: 3, hp: 18, atk: 9, def: 5, move: 5, range: 1, cost: 48, domain: "land", faction: "mamluk", text: "精锐骑兵，击杀经验×2", charge: 2 },
-    jihadist: { name: "圣战者", icon: "⚡", level: 2, hp: 14, atk: 8, def: 2, move: 3, range: 1, cost: 34, domain: "land", faction: "mamluk", text: "对异阵营攻击+2，狂热不怕死" },
+    jihadist: { name: "圣战者", icon: "⚡", level: 2, hp: 14, atk: 8, def: 2, move: 3, range: 1, cost: 34, domain: "land", faction: "mamluk", text: "对异联盟攻击+2，狂热不怕死" },
     arabArcher: { name: "阿拉伯弓手", icon: "🪶", level: 2, hp: 9, atk: 7, def: 1, move: 3, range: 2, cost: 32, domain: "land", faction: "mamluk", text: "沙漠地形移动不消耗" },
     camelWarrior: { name: "骆驼骑兵", icon: "🐪", level: 3, hp: 15, atk: 8, def: 4, move: 5, range: 1, cost: 42, domain: "land", faction: "mamluk", text: "吓到敌方马匹", bonusVs: { cavalry: 3 } },
     arabDhow: { name: "阿拉伯帆船", icon: "⚓", level: 2, hp: 16, atk: 9, def: 3, move: 5, range: 2, cost: 44, domain: "sea", faction: "mamluk", text: "可兼职运输2个陆军", transport: 2 },
-    siegeCrossbow: { name: "攻城弩", icon: "🔨", level: 3, hp: 10, atk: 10, def: 1, move: 2, range: 3, cost: 46, domain: "land", faction: "mamluk", text: "对建筑伤害×1.3" },
+    siegeCrossbow: { name: "攻城弩", icon: "🔨", level: 3, hp: 10, atk: 10, def: 1, move: 2, range: 3, cost: 46, domain: "land", faction: "mamluk", text: "对据点驻军伤害+2" },
     // === 马穆鲁克国家特色兵种 ===
     sultanGuard: { name: "苏丹禁卫军", icon: "👑", level: 3, hp: 22, atk: 11, def: 7, move: 5, range: 1, cost: 62, domain: "land", faction: "mamluk", nation: "egypt", text: "超精锐骑兵，击杀后回血3", charge: 3 },
-    syrianLongbow: { name: "叙利亚长弓手", icon: "🌙", level: 3, hp: 10, atk: 9, def: 2, move: 2, range: 3, cost: 46, domain: "land", faction: "mamluk", nation: "syria", text: "阵营最远陆军" },
+    syrianLongbow: { name: "叙利亚长弓手", icon: "🌙", level: 3, hp: 10, atk: 9, def: 2, move: 2, range: 3, cost: 46, domain: "land", faction: "mamluk", nation: "syria", text: "联盟最远陆军" },
     caliphScholar: { name: "哈里发学者", icon: "📜", level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: "land", faction: "mamluk", nation: "baghdad", text: "光环单位，周围2格友军攻防+1" },
-    // === 大明帝国（ming）阵营专属兵种 ===
+    // === 大明帝国（ming）联盟专属兵种 ===
     shenjiBattalion: { name: "神机营火枪兵", icon: "🎇", level: 3, hp: 8, atk: 9, def: 1, move: 2, range: 3, cost: 48, domain: "land", faction: "ming", text: "火器齐射，攻击溅射50%到周围1格" },
     qiArmy: { name: "戚家军", icon: "🥋", level: 2, hp: 16, atk: 7, def: 6, move: 3, range: 1, cost: 44, domain: "land", faction: "ming", text: "高防步兵，鸳鸯阵", bonusVs: { cavalry: 3 } },
     mingCavalry: { name: "大明骑兵", icon: "🐅", level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 46, domain: "land", faction: "ming", text: "通用机动打击", charge: 2 },
     worksEngineer: { name: "工部工程师", icon: "🏗️", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 46, domain: "land", faction: "ming", builder: true, text: "造船/建营速度+50%，费用-10%" },
     treasureShip: { name: "宝船", icon: "🐉", level: 3, hp: 30, atk: 4, def: 5, move: 3, range: 1, cost: 60, domain: "sea", faction: "ming", transport: 10, text: "巨型运输船，可运10个陆军" },
-    hongyiCannon: { name: "红夷大炮", icon: "☄️", level: 3, hp: 6, atk: 16, def: 1, move: 1, range: 5, cost: 64, domain: "land", faction: "ming", text: "超远程攻城，阵营最远单位" },
+    hongyiCannon: { name: "红夷大炮", icon: "☄️", level: 3, hp: 6, atk: 16, def: 1, move: 1, range: 5, cost: 64, domain: "land", faction: "ming", text: "超远程攻城，联盟最远单位" },
     // === 大明国家特色兵种 ===
     jinyiwei: { name: "锦衣卫", icon: "🕵️", level: 2, hp: 10, atk: 8, def: 2, move: 6, range: 1, cost: 48, domain: "land", faction: "ming", nation: "mingCore", text: "高机动侦察/暗杀，攻击后不被反击" },
     joseonTurtleShip: { name: "朝鲜龟船", icon: "🐢", level: 3, hp: 28, atk: 7, def: 8, move: 3, range: 2, cost: 56, domain: "sea", faction: "ming", nation: "joseon", text: "装甲战船，反弹30%受到的伤害" },
@@ -196,109 +196,109 @@
   };
   var SITE_NAMES_BY_NATION = {
     austria: {
-      city: ["维也纳", "格拉茨", "林茨", "萨尔茨堡", "因斯布鲁克"],
-      shipyard: ["维也纳港", "林茨港", "多瑙河船坞"],
-      fortress: ["霍夫堡", "萨尔茨堡要塞", "美泉宫堡垒"],
-      oil: ["维也纳盆地油田", "阿尔卑斯油区"],
-      barracks: ["奥地利军营", "哈布斯堡军营", "维也纳卫戍营"]
+      city: ["维也纳", "格拉茨", "林茨", "萨尔茨堡", "因斯布鲁克", "克拉根福", "圣帕尔滕", "上瓦特", "维瑟尔堡", "阿姆施泰滕", "多瑙河畔克雷姆斯", "茨维特尔"],
+      shipyard: ["维也纳港", "林茨港", "多瑙河船坞", "克雷姆斯港", "图尔恩港", "维也纳新港", "多瑙河畔船坞", "林茨新港"],
+      fortress: ["霍夫堡", "美泉宫堡垒", "萨尔茨堡要塞", "霍亨维尔芬堡", "库夫施泰因要塞", "拉滕贝格堡", "哈尔堡要塞", "佩尔诺斯坦堡"],
+      oil: ["维也纳盆地油田", "阿尔卑斯油区", "下奥地利油田", "施蒂利亚油井", "布尔根兰油田", "上奥地利油区"],
+      barracks: ["奥地利军营", "哈布斯堡军营", "维也纳卫戍营", "格拉茨兵营", "林茨兵营", "萨尔茨堡卫戍营", "因斯布鲁克兵营", "圣帕尔滕兵营"]
     },
     prussia: {
-      city: ["柏林", "柯尼斯堡", "波茨坦", "但泽", "布雷斯劳"],
-      shipyard: ["基尔港", "但泽港", "波罗的海船坞"],
-      fortress: ["柏林堡垒", "柯尼斯堡要塞", "波茨坦卫城"],
-      oil: ["普鲁士油区", "波罗的海油田"],
-      barracks: ["普鲁士军营", "条顿骑士团军营", "波茨坦近卫营"]
+      city: ["柏林", "柯尼斯堡", "波茨坦", "但泽", "布雷斯劳", "波美拉尼亚", "勃兰登堡", "斯德丁", "库尔姆", "托伦", "阿伦施泰因", "埃尔宾"],
+      shipyard: ["基尔港", "但泽港", "波罗的海船坞", "斯德丁港", "柯尼斯堡港", "皮劳港", "维斯马港", "罗斯托克港"],
+      fortress: ["柏林堡垒", "柯尼斯堡要塞", "波茨坦卫城", "斯潘道要塞", "屈斯特林要塞", "格劳登茨堡", "托伦要塞", "库尔姆堡"],
+      oil: ["普鲁士油区", "波罗的海油田", "波美拉尼亚油井", "勃兰登堡油田", "西里西亚油区", "东普鲁士油井"],
+      barracks: ["普鲁士军营", "条顿骑士团军营", "波茨坦近卫营", "柏林卫戍营", "柯尼斯堡兵营", "但泽兵营", "布雷斯劳卫戍营", "斯德丁兵营"]
     },
     bavaria: {
-      city: ["慕尼黑", "纽伦堡", "奥格斯堡", "雷根斯堡", "维尔茨堡"],
-      shipyard: ["慕尼黑河港", "多瑙河船坞"],
-      fortress: ["慕尼黑堡垒", "纽伦堡城堡", "奥格斯堡要塞"],
-      oil: ["巴伐利亚油区", "阿尔卑斯山麓油田"],
-      barracks: ["巴伐利亚军营", "山地猎兵营", "慕尼黑卫戍营"]
+      city: ["慕尼黑", "纽伦堡", "奥格斯堡", "雷根斯堡", "维尔茨堡", "因戈尔施塔特", "班贝格", "帕绍", "兰茨胡特", "安贝格", "魏登", "肯普滕"],
+      shipyard: ["慕尼黑河港", "多瑙河船坞", "雷根斯堡港", "帕绍港", "因戈尔施塔特港", "美因河船坞", "班贝格港", "维尔茨堡港"],
+      fortress: ["慕尼黑堡垒", "纽伦堡城堡", "奥格斯堡要塞", "雷根斯堡卫城", "维尔茨堡要塞", "因戈尔施塔特堡", "班贝格要塞", "兰茨胡特堡"],
+      oil: ["巴伐利亚油区", "阿尔卑斯山麓油田", "多瑙河油井", "上巴伐利亚油区", "下巴伐利亚油田", "弗兰肯油井"],
+      barracks: ["巴伐利亚军营", "山地猎兵营", "慕尼黑卫戍营", "纽伦堡兵营", "奥格斯堡卫戍营", "雷根斯堡兵营", "维尔茨堡卫戍营", "因戈尔施塔特兵营"]
     },
     goldenHordeCore: {
-      city: ["萨莱", "阿斯特拉罕", "保加尔", "克里米亚", "塔奈"],
-      shipyard: ["萨莱港", "阿斯特拉罕港", "里海船坞"],
-      fortress: ["萨莱堡垒", "克里米亚要塞", "保加尔卫城"],
-      oil: ["里海油田", "巴库油区", "伏尔加油井"],
-      barracks: ["金帐军营", "可汗卫军营", "游牧骑兵营"]
+      city: ["萨莱", "阿斯特拉罕", "保加尔", "克里米亚", "塔奈", "马扎尔", "速答黑", "喀山", "阿速夫", "塔纳伊斯", "别尔哥罗德", "新萨莱"],
+      shipyard: ["萨莱港", "阿斯特拉罕港", "里海船坞", "阿速夫港", "塔奈港", "喀山港", "伏尔加河船坞", "顿河船坞"],
+      fortress: ["萨莱堡垒", "克里米亚要塞", "保加尔卫城", "阿斯特拉罕堡", "喀山要塞", "塔奈堡", "阿速夫要塞", "别尔哥罗德堡"],
+      oil: ["里海油田", "巴库油区", "伏尔加油井", "阿斯特拉罕油区", "顿河油田", "乌拉尔油井", "北高加索油区"],
+      barracks: ["金帐军营", "可汗卫军营", "游牧骑兵营", "萨莱卫戍营", "阿斯特拉罕兵营", "保加尔兵营", "克里米亚骑兵营", "喀山兵营"]
     },
     whiteHorde: {
-      city: ["玉龙杰赤", "撒马尔罕", "塔什干", "布哈拉", "安集延"],
-      shipyard: ["咸海港", "玉龙杰赤港", "阿姆河船坞"],
-      fortress: ["玉龙杰赤堡垒", "撒马尔罕要塞", "布哈拉卫城"],
-      oil: ["咸海油区", "费尔干纳油田", "河中油井"],
-      barracks: ["白帐军营", "玉龙杰赤卫戍营", "河中骑兵营"]
+      city: ["玉龙杰赤", "撒马尔罕", "塔什干", "布哈拉", "安集延", "浩罕", "纳曼干", "卡尔希", "铁尔梅兹", "沙赫里萨布兹", "卡拉卡尔帕克", "花剌子模"],
+      shipyard: ["咸海港", "玉龙杰赤港", "阿姆河船坞", "布哈拉港", "塔什干河港", "撒马尔罕港", "泽拉夫尚河船坞", "锡尔河船坞"],
+      fortress: ["玉龙杰赤堡垒", "撒马尔罕要塞", "布哈拉卫城", "塔什干堡", "安集延要塞", "浩罕堡", "纳曼干要塞", "铁尔梅兹堡"],
+      oil: ["咸海油区", "费尔干纳油田", "河中油井", "布哈拉油区", "撒马尔罕油田", "阿姆河油井", "花剌子模油区"],
+      barracks: ["白帐军营", "玉龙杰赤卫戍营", "河中骑兵营", "撒马尔罕兵营", "布哈拉兵营", "塔什干卫戍营", "安集延骑兵营", "浩罕兵营"]
     },
     blueHorde: {
-      city: ["基辅", "莫斯科", "诺夫哥罗德", "斯摩棱斯克", "切尔尼戈夫"],
-      shipyard: ["基辅港", "诺夫哥罗德港", "第聂伯河船坞"],
-      fortress: ["基辅堡垒", "莫斯科克里姆林", "诺夫哥罗德要塞"],
-      oil: ["第聂伯油区", "莫斯科盆地油田", "伏尔加上游油井"],
-      barracks: ["蓝帐军营", "基辅卫戍营", "罗斯骑兵营"]
+      city: ["基辅", "莫斯科", "诺夫哥罗德", "斯摩棱斯克", "切尔尼戈夫", "梁赞", "弗拉基米尔", "苏兹达尔", "特维尔", "普斯科夫", "图拉", "卡卢加"],
+      shipyard: ["基辅港", "诺夫哥罗德港", "第聂伯河船坞", "莫斯科河港", "弗拉基米尔港", "奥卡河船坞", "伏尔加河上游船坞", "普斯科夫港"],
+      fortress: ["基辅堡垒", "莫斯科克里姆林", "诺夫哥罗德要塞", "斯摩棱斯克堡", "切尔尼戈夫要塞", "梁赞堡", "弗拉基米尔卫城", "特维尔要塞"],
+      oil: ["第聂伯油区", "莫斯科盆地油田", "伏尔加上游油井", "斯摩棱斯克油区", "梁赞油田", "卡卢加油井", "图拉油区"],
+      barracks: ["蓝帐军营", "基辅卫戍营", "罗斯骑兵营", "莫斯科兵营", "诺夫哥罗德兵营", "弗拉基米尔卫戍营", "斯摩棱斯克兵营", "梁赞兵营"]
     },
     veniceCore: {
-      city: ["威尼斯", "帕多瓦", "维罗纳", "特雷维索", "基奥贾"],
-      shipyard: ["威尼斯兵工厂", "基奥贾港", "亚得里亚海船坞"],
-      fortress: ["威尼斯堡垒", "维罗纳要塞", "帕多瓦卫城"],
-      oil: ["亚得里亚油区", "威尼斯湾油田"],
-      barracks: ["威尼斯军营", "共和国卫戍营", "海军陆战营"]
+      city: ["威尼斯", "帕多瓦", "维罗纳", "特雷维索", "基奥贾", "罗维戈", "贝卢诺", "乌迪内", "的里雅斯特", "普拉", "扎拉", "科托尔"],
+      shipyard: ["威尼斯兵工厂", "基奥贾港", "亚得里亚海船坞", "帕多瓦港", "维罗纳港", "特雷维索港", "的里雅斯特港", "普拉港"],
+      fortress: ["威尼斯堡垒", "维罗纳要塞", "帕多瓦卫城", "基奥贾堡", "特雷维索要塞", "乌迪内堡", "的里雅斯特要塞", "普拉堡"],
+      oil: ["亚得里亚油区", "威尼斯湾油田", "波河平原油井", "威尼托油区", "弗留利油田", "伊斯特拉油井"],
+      barracks: ["威尼斯军营", "共和国卫戍营", "海军陆战营", "帕多瓦兵营", "维罗纳卫戍营", "特雷维索兵营", "基奥贾海军营", "乌迪内兵营"]
     },
     genoa: {
-      city: ["热那亚", "比萨", "佛罗伦萨", "锡耶纳", "卢卡"],
-      shipyard: ["热那亚港", "比萨港", "利古里亚海船坞"],
-      fortress: ["热那亚堡垒", "比萨要塞", "佛罗伦萨卫城"],
-      oil: ["利古里亚油区", "托斯卡纳油田"],
-      barracks: ["热那亚军营", "共和国雇佣军营", "比萨卫戍营"]
+      city: ["热那亚", "比萨", "佛罗伦萨", "锡耶纳", "卢卡", "里窝那", "那不勒斯", "萨勒诺", "阿马尔菲", "萨沃纳", "拉斯佩齐亚", "圣雷莫"],
+      shipyard: ["热那亚港", "比萨港", "利古里亚海船坞", "里窝那港", "那不勒斯港", "萨勒诺港", "阿马尔菲港", "萨沃纳港"],
+      fortress: ["热那亚堡垒", "比萨要塞", "佛罗伦萨卫城", "锡耶纳堡", "卢卡要塞", "里窝那堡", "那不勒斯要塞", "萨勒诺堡"],
+      oil: ["利古里亚油区", "托斯卡纳油田", "第勒尼安海油井", "热那亚湾油区", "比萨平原油田", "坎帕尼亚油井"],
+      barracks: ["热那亚军营", "共和国雇佣军营", "比萨卫戍营", "热那亚海军营", "佛罗伦萨兵营", "锡耶纳兵营", "里窝那卫戍营", "那不勒斯兵营"]
     },
     ragusa: {
-      city: ["拉古萨", "扎达尔", "斯普利特", "科托尔", "杜布罗夫尼克"],
-      shipyard: ["拉古萨港", "扎达尔港", "亚得里亚海南部船坞"],
-      fortress: ["拉古萨堡垒", "杜布罗夫尼克要塞", "科托尔卫城"],
-      oil: ["达尔马提亚油区", "亚得里亚海南部油田"],
-      barracks: ["拉古萨军营", "共和国卫戍营", "达尔马提亚轻步兵营"]
+      city: ["拉古萨", "扎达尔", "斯普利特", "科托尔", "杜布罗夫尼克", "希贝尼克", "特罗吉尔", "布拉扎", "维斯", "乌尔奇尼", "巴尔", "布德瓦"],
+      shipyard: ["拉古萨港", "扎达尔港", "亚得里亚海南部船坞", "斯普利特港", "科托尔港", "杜布罗夫尼克港", "希贝尼克港", "特罗吉尔港"],
+      fortress: ["拉古萨堡垒", "杜布罗夫尼克要塞", "科托尔卫城", "扎达尔堡", "斯普利特要塞", "希贝尼克堡", "特罗吉尔要塞", "乌尔奇尼堡"],
+      oil: ["达尔马提亚油区", "亚得里亚海南部油田", "黑山油井", "杜布罗夫尼克油区", "科托尔湾油田", "阿尔巴尼亚油井"],
+      barracks: ["拉古萨军营", "共和国卫戍营", "达尔马提亚轻步兵营", "杜布罗夫尼克兵营", "扎达尔卫戍营", "斯普利特兵营", "科托尔兵营", "希贝尼克兵营"]
     },
     egypt: {
-      city: ["开罗", "亚历山大", "孟菲斯", "吉萨", "塞得港"],
-      shipyard: ["亚历山大港", "塞得港", "尼罗河船坞"],
-      fortress: ["开罗堡垒", "亚历山大要塞", "吉萨卫城"],
-      oil: ["苏伊士油区", "尼罗河三角洲油田", "红海油井"],
-      barracks: ["马穆鲁克军营", "开罗卫戍营", "奴隶骑兵营"]
+      city: ["开罗", "亚历山大", "孟菲斯", "吉萨", "塞得港", "苏伊士", "达米埃塔", "罗塞塔", "阿斯旺", "卢克索", "法尤姆", "坦塔"],
+      shipyard: ["亚历山大港", "塞得港", "尼罗河船坞", "苏伊士港", "达米埃塔港", "罗塞塔港", "红海船坞", "苏伊士湾港"],
+      fortress: ["开罗堡垒", "亚历山大要塞", "吉萨卫城", "塞得港堡", "苏伊士要塞", "达米埃塔堡", "阿斯旺要塞", "孟菲斯堡"],
+      oil: ["苏伊士油区", "尼罗河三角洲油田", "红海油井", "西奈油区", "亚历山大湾油田", "上埃及油井", "法尤姆油区"],
+      barracks: ["马穆鲁克军营", "开罗卫戍营", "奴隶骑兵营", "亚历山大兵营", "吉萨兵营", "塞得港卫戍营", "苏伊士兵营", "孟菲斯兵营"]
     },
     syria: {
-      city: ["大马士革", "阿勒颇", "安条克", "的黎波里", "霍姆斯"],
-      shipyard: ["的黎波里港", "安条克港", "地中海东岸船坞"],
-      fortress: ["大马士革堡垒", "阿勒颇要塞", "骑士堡"],
-      oil: ["叙利亚油区", "幼发拉底河油田", "霍姆斯油井"],
-      barracks: ["叙利亚军营", "大马士革卫戍营", "阿拉伯轻骑兵营"]
+      city: ["大马士革", "阿勒颇", "安条克", "的黎波里", "霍姆斯", "哈马", "拉塔基亚", "塔尔图斯", "帕尔米拉", "德拉", "苏韦达", "代尔祖尔"],
+      shipyard: ["的黎波里港", "安条克港", "地中海东岸船坞", "拉塔基亚港", "塔尔图斯港", "大马士革河港", "霍姆斯港", "哈马港"],
+      fortress: ["大马士革堡垒", "阿勒颇要塞", "骑士堡", "安条克卫城", "的黎波里堡", "霍姆斯要塞", "哈马堡", "帕尔米拉要塞"],
+      oil: ["叙利亚油区", "幼发拉底河油田", "霍姆斯油井", "代尔祖尔油区", "阿勒颇平原油田", "拉塔基亚油井", "帕尔米拉油区"],
+      barracks: ["叙利亚军营", "大马士革卫戍营", "阿拉伯轻骑兵营", "阿勒颇兵营", "安条克兵营", "霍姆斯卫戍营", "哈马兵营", "的黎波里兵营"]
     },
     baghdad: {
-      city: ["巴格达", "巴士拉", "库法", "摩苏尔", "纳杰夫"],
-      shipyard: ["巴士拉港", "巴格达河港", "波斯湾船坞"],
-      fortress: ["巴格达堡垒", "巴士拉要塞", "圆城卫城"],
-      oil: ["波斯湾油田", "巴士拉油区", "美索不达米亚油井"],
-      barracks: ["哈里发军营", "巴格达卫戍营", "学者护卫营"]
+      city: ["巴格达", "巴士拉", "库法", "摩苏尔", "纳杰夫", "卡尔巴拉", "萨迈拉", "费卢杰", "拉马迪", "提克里特", "基尔库克", "巴古拜"],
+      shipyard: ["巴士拉港", "巴格达河港", "波斯湾船坞", "库法港", "摩苏尔港", "纳杰夫港", "幼发拉底河船坞", "底格里斯河船坞"],
+      fortress: ["巴格达堡垒", "巴士拉要塞", "圆城卫城", "库法堡", "摩苏尔要塞", "纳杰夫堡", "萨迈拉要塞", "提克里特堡"],
+      oil: ["波斯湾油田", "巴士拉油区", "美索不达米亚油井", "基尔库克油区", "摩苏尔油田", "纳杰夫油井", "萨迈拉油区"],
+      barracks: ["哈里发军营", "巴格达卫戍营", "学者护卫营", "巴士拉兵营", "库法兵营", "摩苏尔卫戍营", "纳杰夫兵营", "萨迈拉兵营"]
     },
     mingCore: {
-      city: ["北京", "南京", "西安", "洛阳", "开封"],
-      shipyard: ["泉州港", "广州港", "南京龙江船厂"],
-      fortress: ["山海关", "嘉峪关", "居庸关"],
-      oil: ["大庆油田", "胜利油田", "华北油区"],
-      barracks: ["神机营", "三千营", "五军营"]
+      city: ["北京", "南京", "西安", "洛阳", "开封", "杭州", "苏州", "成都", "武汉", "广州", "济南", "福州"],
+      shipyard: ["泉州港", "广州港", "南京龙江船厂", "福州港", "宁波港", "杭州湾船坞", "登州港", "扬州港"],
+      fortress: ["山海关", "嘉峪关", "居庸关", "雁门关", "娘子关", "潼关", "函谷关", "剑门关"],
+      oil: ["大庆油田", "胜利油田", "华北油区", "辽河油田", "中原油田", "四川油井", "江汉油区"],
+      barracks: ["神机营", "三千营", "五军营", "北京卫戍营", "南京兵营", "西安兵营", "洛阳兵营", "济南卫戍营"]
     },
     joseon: {
-      city: ["汉城", "平壤", "开城", "釜山", "庆州"],
-      shipyard: ["釜山港", "仁川港", "朝鲜海峡船坞"],
-      fortress: ["汉城堡垒", "平壤要塞", "釜山卫城"],
-      oil: ["朝鲜湾油区", "平壤盆地油田"],
-      barracks: ["朝鲜军营", "汉城卫戍营", "龟船水师营"]
+      city: ["汉城", "平壤", "开城", "釜山", "庆州", "全州", "公州", "安东", "江陵", "咸兴", "海州", "义州"],
+      shipyard: ["釜山港", "仁川港", "朝鲜海峡船坞", "汉城港", "平壤港", "庆州港", "全罗港", "东海岸船坞"],
+      fortress: ["汉城堡垒", "平壤要塞", "釜山卫城", "开城堡", "庆州要塞", "全州堡", "公州要塞", "义州堡"],
+      oil: ["朝鲜湾油区", "平壤盆地油田", "咸镜北道油井", "全罗南道油区", "庆尚北道油田", "平安南道油井"],
+      barracks: ["朝鲜军营", "汉城卫戍营", "龟船水师营", "平壤兵营", "釜山兵营", "庆州卫戍营", "全州兵营", "开城兵营"]
     },
     annam: {
-      city: ["河内", "顺化", "岘港", "海防", "升龙"],
-      shipyard: ["海防港", "岘港", "北部湾船坞"],
-      fortress: ["河内堡垒", "顺化要塞", "岘港卫城"],
-      oil: ["北部湾油区", "河内盆地油田"],
-      barracks: ["安南军营", "河内卫戍营", "象兵训练营"]
+      city: ["河内", "顺化", "岘港", "海防", "升龙", "清化", "义安", "广南", "平定", "富安", "庆和", "林邑"],
+      shipyard: ["海防港", "岘港", "北部湾船坞", "河内港", "顺化港", "清化港", "义安港", "归仁港"],
+      fortress: ["河内堡垒", "顺化要塞", "岘港卫城", "清化堡", "义安要塞", "广南堡", "平定要塞", "升龙堡"],
+      oil: ["北部湾油区", "河内盆地油田", "清化油井", "义安油区", "广南油田", "平定油井", "富安油区"],
+      barracks: ["安南军营", "河内卫戍营", "象兵训练营", "顺化兵营", "海防兵营", "清化兵营", "义安兵营", "岘港卫戍营"]
     }
   };
 
@@ -607,6 +607,10 @@
     const bonusVs = typeMeta(attacker.type).bonusVs || {};
     return bonusVs[defender.type] || 0;
   }
+  function combatNation(game, owner) {
+    if (owner === "player") return game.settings?.nation;
+    return game.aiProfiles?.[owner]?.nation;
+  }
   function computeDamage(game, attacker, defender, fromCell, toCell, isCounter, deterministic) {
     const attackMeta = typeMeta(attacker.type);
     const defenseMeta = typeMeta(defender.type);
@@ -615,6 +619,8 @@
     const terrainDef = TERRAIN[game.terrain[toCell.y][toCell.x]].def;
     const attackerFaction = attacker.owner === "player" ? game.settings?.faction : game.aiProfiles?.[attacker.owner]?.faction;
     const defenderFaction = defender.owner === "player" ? game.settings?.faction : game.aiProfiles?.[defender.owner]?.faction;
+    const atkNation = combatNation(game, attacker.owner);
+    const defNation = combatNation(game, defender.owner);
     let factionAtkBonus = 0;
     let factionDefBonus = 0;
     if (attackerFaction === "mamluk" && attackerFaction !== defenderFaction) factionAtkBonus += 2;
@@ -626,15 +632,28 @@
       const hreCities = game.sites.filter((s) => s.kind === "city" && s.owner === defender.owner).length;
       if (hreCities >= 5) factionDefBonus += 1;
     }
-    const atkScholar = game.units.find((u) => u.owner === attacker.owner && u.type === "caliphScholar" && Math.abs(u.x - attacker.x) <= 2 && Math.abs(u.y - attacker.y) <= 2);
-    const defScholar = game.units.find((u) => u.owner === defender.owner && u.type === "caliphScholar" && Math.abs(u.x - defender.x) <= 2 && Math.abs(u.y - defender.y) <= 2);
+    const scholarRange = defNation === "baghdad" || atkNation === "baghdad" ? 3 : 2;
+    const atkScholar = game.units.find((u) => u.owner === attacker.owner && u.type === "caliphScholar" && Math.abs(u.x - attacker.x) <= scholarRange && Math.abs(u.y - attacker.y) <= scholarRange);
+    const defScholar = game.units.find((u) => u.owner === defender.owner && u.type === "caliphScholar" && Math.abs(u.x - defender.x) <= scholarRange && Math.abs(u.y - defender.y) <= scholarRange);
     const attackBuff = siteBonus(game, attackSite, attacker, "attack") + matchupBonus(attacker, defender) + factionAtkBonus + (atkScholar ? 1 : 0);
     const defenseBuff = siteBonus(game, defenseSite, defender, "defense") + terrainDef + factionDefBonus + (defScholar ? 1 : 0);
     const attackHpFactor = 0.55 + attacker.hp / attacker.maxHp * 0.65;
     const defendHpFactor = 0.55 + defender.hp / defender.maxHp * 0.55;
-    const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove ? attackMeta.charge : 0;
-    const base = (attackMeta.atk + attackBuff + attacker.rank) * attackHpFactor + charge;
-    const shield = (defenseMeta.def + defenseBuff) * defendHpFactor;
+    const chargeBonus = atkNation === "austria" && attackMeta.charge ? 1 : 0;
+    const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove && defender.type !== "pikeSquare" ? attackMeta.charge + chargeBonus : 0;
+    const defenderOnSite = !!getSite(game, toCell.x, toCell.y);
+    const guardBonus = defender.type === "imperialGuard" && defenderOnSite && getSite(game, toCell.x, toCell.y).owner === defender.owner ? 3 : 0;
+    const elephantBonus = attacker.type === "annamElephant" && defenseMeta.domain === "land" && !defenseMeta.charge ? 5 : 0;
+    let nationAtk = 0, nationDef = 0;
+    if (atkNation === "goldenHordeCore" && attackMeta.charge) nationAtk += 1;
+    if (atkNation === "veniceCore" && attackMeta.domain === "sea") nationAtk += 1;
+    if (atkNation === "syria" && attackerFaction !== defenderFaction) nationAtk += 1;
+    if (atkNation === "whiteHorde" && defenseMeta.charge) nationAtk += 2;
+    if (atkNation === "prussia" && !!getSite(game, toCell.x, toCell.y)) nationAtk += 3;
+    if (defNation === "blueHorde" && defenseMeta.domain === "land" && !defenseMeta.charge) nationDef += 1;
+    if (defNation === "baghdad" && defender.type === "caliphScholar") nationDef += 2;
+    const base = (attackMeta.atk + attackBuff + attacker.rank + elephantBonus + nationAtk) * attackHpFactor + charge;
+    const shield = (defenseMeta.def + defenseBuff + guardBonus + nationDef) * defendHpFactor;
     const variance = deterministic ? 1 : rnd(3);
     return clamp(Math.round(base - shield * 0.58 + 2 + variance), 1, defender.hp);
   }
@@ -643,13 +662,21 @@
     const damage = computeDamage(game, attacker, defender, attackFrom, { x: defender.x, y: defender.y }, false, deterministic);
     const targetLeft = Math.max(0, defender.hp - damage);
     let counter = 0;
-    if (targetLeft > 0 && inUnitRange(typeMeta(defender.type).range, { x: defender.x, y: defender.y }, attackFrom)) {
+    if (targetLeft > 0 && inUnitRange(effectiveRange(game, defender), { x: defender.x, y: defender.y }, attackFrom)) {
       counter = clamp(Math.round(computeDamage(game, defender, attacker, { x: defender.x, y: defender.y }, attackFrom, true, deterministic) * 0.8), 0, attacker.hp);
     }
     return { damage, counter, kill: targetLeft <= 0, targetLeft, selfLeft: Math.max(0, attacker.hp - counter) };
   }
+  function effectiveRange(game, unitEntry) {
+    const base = typeMeta(unitEntry.type).range;
+    if (base <= 1) return base;
+    const nat = combatNation(game, unitEntry.owner);
+    if (nat === "genoa" && typeMeta(unitEntry.type).domain === "sea") return base + 1;
+    if (nat === "syria") return base + 1;
+    return base;
+  }
   function canAttack(game, attacker, defender, fromCell = { x: attacker.x, y: attacker.y }) {
-    return !!attacker && !!defender && attacker.owner === game.side && !attacker.hasAttacked && areEnemies(game.teams, attacker.owner, defender.owner) && inUnitRange(typeMeta(attacker.type).range, fromCell, defender);
+    return !!attacker && !!defender && attacker.owner === game.side && !attacker.hasAttacked && areEnemies(game.teams, attacker.owner, defender.owner) && inUnitRange(effectiveRange(game, attacker), fromCell, defender);
   }
 
   // src/core/rng.js
@@ -674,8 +701,21 @@
   function getUnit(game, x, y) {
     return game.units.find((entry) => entry.x === x && entry.y === y) || null;
   }
+  function ownerNation(game, owner) {
+    if (owner === "player") return game.settings?.nation;
+    return game.aiProfiles?.[owner]?.nation;
+  }
   function movementCost(game, unitEntry, x, y) {
-    return typeMeta(unitEntry.type).domain === "sea" ? 1 : TERRAIN[game.terrain[y][x]].cost;
+    if (typeMeta(unitEntry.type).domain === "sea") return 1;
+    const terrain = game.terrain[y][x];
+    const baseCost = TERRAIN[terrain].cost;
+    if (baseCost <= 1) return 1;
+    const nation = ownerNation(game, unitEntry.owner);
+    if (nation === "whiteHorde" && (terrain === "desert" || terrain === "sand")) return 1;
+    if (nation === "blueHorde" && terrain === "snow") return 1;
+    if ((nation === "bavaria" || nation === "joseon") && terrain === "hill") return 1;
+    if (nation === "annam" && terrain === "forest") return 1;
+    return baseCost;
   }
   function passable(game, unitEntry, x, y) {
     if (!inBounds2(x, y, game.w, game.h) || getUnit(game, x, y)) {
@@ -1191,7 +1231,8 @@
     }
     function createCamp(owner, x, y) {
       const camp = site("camp", owner, x, y, "临时营地", 2, 0);
-      camp.duration = CAMP_DURATION;
+      const campNat = owner === "player" ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
+      camp.duration = CAMP_DURATION + (campNat === "goldenHordeCore" ? 2 : 0);
       camp.uncapturable = true;
       return camp;
     }
@@ -1317,7 +1358,9 @@
       return rank;
     }
     function effectiveMove(unitEntry) {
-      return unitEntry.baseMove + Math.floor(unitEntry.rank / 2);
+      const nat = unitEntry.owner === "player" ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
+      const prussiaBonus = nat === "prussia" ? 1 : 0;
+      return unitEntry.baseMove + Math.floor(unitEntry.rank / 2) + prussiaBonus;
     }
     function healMultiplier(unitEntry) {
       return 1 + unitEntry.rank * 0.15;
@@ -1343,8 +1386,12 @@
     function factionAdjustedCost(owner, type, cargoTypes = []) {
       const base = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
       const fac = owner === "player" ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+      const nat = owner === "player" ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
       const typeFac = typeMeta(type).faction;
-      const markup = fac === "venice" && typeFac && typeFac !== "venice" ? 1.5 : 1;
+      let markup = fac === "venice" && typeFac && typeFac !== "venice" ? 1.5 : 1;
+      if (nat === "ragusa") markup *= 0.95;
+      if (nat === "veniceCore" && typeMeta(type).domain === "sea") markup *= 0.8;
+      if (nat === "mingCore" && (typeMeta(type).domain === "sea" || type === "engineer" || type === "worksEngineer")) markup *= 0.9;
       return Math.round(base * markup);
     }
     function cargoLabel(type) {
@@ -1424,7 +1471,9 @@
       attacker.hasAttacked = true;
       attacker.acted = true;
       if (atkFaction === "ming" && typeMeta(attacker.type).range > 1) {
-        const splashDamage = Math.max(1, Math.round(result.damage * 0.5));
+        const splashNat = attacker.owner === "player" ? game.settings?.nation : game.aiProfiles?.[attacker.owner]?.nation;
+        const splashRatio = splashNat === "mingCore" ? 0.6 : 0.5;
+        const splashDamage = Math.max(1, Math.round(result.damage * splashRatio));
         for (const nearby of game.units.filter((u) => u.owner !== attacker.owner && Math.abs(u.x - defender.x) <= 1 && Math.abs(u.y - defender.y) <= 1 && (u.x !== defender.x || u.y !== defender.y))) {
           nearby.hp -= splashDamage;
           log(`${typeMeta(attacker.type).name}的火器齐射溅射到${typeMeta(nearby.type).name}，造成 ${splashDamage} 点伤害。`, "battle");
@@ -1439,11 +1488,19 @@
       if (defender.hp <= 0) {
         incrementStat("kills", attacker.owner, 1 + (defender.cargo?.length || 0));
         grantKills(attacker, 1 + (defender.cargo?.length || 0));
+        if (attacker.type === "sultanGuard") {
+          attacker.hp = Math.min(attacker.maxHp, attacker.hp + 3);
+        }
         removeUnit(defender);
         log(`${typeMeta(defender.type).name}被消灭。`, "battle");
-      } else if (result.counter > 0) {
+      } else if (result.counter > 0 && attacker.type !== "jinyiwei") {
         attacker.hp -= result.counter;
         log(`${typeMeta(defender.type).name}反击，造成 ${result.counter} 点伤害。`, "battle");
+        if (defender.type === "joseonTurtleShip" && defender.hp > 0) {
+          const reflect = Math.max(1, Math.round(result.damage * 0.3));
+          attacker.hp -= reflect;
+          log(`${typeMeta(defender.type).name}的装甲反弹了 ${reflect} 点伤害。`, "battle");
+        }
         if (attacker.hp <= 0) {
           incrementStat("kills", defender.owner, 1 + (attacker.cargo?.length || 0));
           grantKills(defender, 1 + (attacker.cargo?.length || 0));
@@ -1499,6 +1556,13 @@
       const oldTier = siteEntry.tier;
       const oldOwner = siteEntry.owner;
       siteEntry.owner = unitEntry.owner;
+      if ((unitEntry.type === "tradeCaravan" || unitEntry.type === "ragusaCaravan") && !siteEntry._caravanBonus) {
+        siteEntry.income += 5;
+        siteEntry._caravanBonus = true;
+      }
+      if (unitEntry.type === "siegeTower") {
+        unitEntry.move = unitEntry.maxMove;
+      }
       if (oldOwner !== "neutral" && Math.random() < 0.4) {
         const capturerNation = unitEntry.owner === "player" ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
         const nameSet = SITE_NAMES_BY_NATION?.[capturerNation];
@@ -1643,7 +1707,9 @@
         const nearest = Math.min(...supports.map((siteEntry) => dist(siteEntry, unitEntry)));
         if (!unitEntry.lastAttacked) {
           const ratio = (nearest === 0 ? 0.16 : nearest <= 1 ? 0.1 : nearest >= 14 ? 0.02 : Math.max(0.02, 0.1 - (nearest - 1) * 0.08 / 13)) * healMultiplier(unitEntry);
-          unitEntry.hp = Math.min(unitEntry.maxHp, unitEntry.hp + Math.max(1, Math.ceil(unitEntry.maxHp * ratio)));
+          const healNat = unitEntry.owner === "player" ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
+          const bavariaBonus = healNat === "bavaria" ? 1 : 0;
+          unitEntry.hp = Math.min(unitEntry.maxHp, unitEntry.hp + Math.max(1, Math.ceil(unitEntry.maxHp * ratio)) + bavariaBonus);
         }
         unitEntry.lastAttacked = false;
       }
@@ -1651,8 +1717,12 @@
     function grantIncome(owner) {
       const base = game.sites.filter((entry) => entry.owner === owner).reduce((sum, entry) => sum + entry.income, 0);
       const incFac = owner === "player" ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+      const incNation = owner === "player" ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
       const factionMult = incFac === "venice" ? 1.25 : 1;
-      const gain = Math.round(base * (game.settings?.incomeMult || 1) * factionMult);
+      let nationIncomeBonus = 0;
+      if (incNation === "austria" || incNation === "egypt") nationIncomeBonus += game.sites.filter((s) => s.kind === "city" && s.owner === owner).length * 2;
+      if (incNation === "genoa") nationIncomeBonus += Math.round(base * 0.1);
+      const gain = Math.round(base * (game.settings?.incomeMult || 1) * factionMult) + nationIncomeBonus;
       game.goldByOwner[owner] += gain;
       if (gain > 0) {
         log(`${ownerName(owner)}获得 ${gain} 金币收入。`, "gold");
@@ -1936,7 +2006,7 @@
       if (owner === "player") return game.settings?.faction;
       return game.aiProfiles?.[owner]?.faction;
     }
-    function ownerNation(owner) {
+    function ownerNation2(owner) {
       if (owner === "player") return game.settings?.nation;
       return game.aiProfiles?.[owner]?.nation;
     }
@@ -1946,7 +2016,7 @@
         return [];
       }
       const faction = ownerFaction(siteEntry.owner);
-      const nation = ownerNation(siteEntry.owner);
+      const nation = ownerNation2(siteEntry.owner);
       const isVenice = faction === "venice";
       return Object.keys(TYPES).filter((type) => {
         const meta = typeMeta(type);
@@ -3729,7 +3799,7 @@
       $("statsSummary").innerHTML = "";
       recordStatSnapshot("deploy");
       log(`版本 0.1.2 战局开始：${MAPS[game.settings.map].name} · ${SIZES[game.settings.size].name} · ${ASPECTS[game.settings.aspect].name} ${W}×${H} · ${game.sites.filter((entry) => entry.kind === "city").length} 座城市 · ${game.sites.filter((entry) => entry.kind === "shipyard").length} 座船坞。`, "system");
-      log(`玩家阵营：${FACTIONS[game.settings.faction]?.name || game.settings.faction} · ${NATIONS[game.settings.nation]?.name || game.settings.nation}（特色兵种：${NATIONS[game.settings.nation]?.unique || "待定"}）`, "system");
+      log(`玩家联盟：${FACTIONS[game.settings.faction]?.name || game.settings.faction} · ${NATIONS[game.settings.nation]?.name || game.settings.nation}（特色兵种：${NATIONS[game.settings.nation]?.unique || "待定"}）`, "system");
       const focusCity = game.sites.find((entry) => entry.kind === "city" && entry.owner === (spectator ? owners[0] : "player"));
       if (focusCity) {
         centerCamOn(focusCity.x, focusCity.y);
@@ -4090,7 +4160,7 @@
         <td><select id="ai${i}Color" title="AI 颜色">${colorOptionsMarkup}</select></td>
         <td><select id="ai${i}Team" title="AI 组别">${teamOptionsMarkup}</select></td>
         <td><select id="ai${i}Agg" title="AI 进攻欲"><option value="cautious">谨慎</option><option value="balanced" selected>均衡</option><option value="reckless">冲动</option></select></td>
-        <td><select id="ai${i}Faction" class="ai-faction-select" data-ai="${i}" title="AI 阵营">${aiFactionMarkup}</select></td>
+        <td><select id="ai${i}Faction" class="ai-faction-select" data-ai="${i}" title="AI 联盟">${aiFactionMarkup}</select></td>
         <td><select id="ai${i}Nation" title="AI 国家"></select></td>
       </tr>`;
       }).join("");
@@ -4116,7 +4186,7 @@
       <div class="rule-version">
         <h3 class="info-section-title">基础玩法</h3>
         <div class="rule-grid">
-          <section class="rule-block"><h3>回合流程</h3><ul><li>每个阵营依次行动；回合开始时统一重置移动、结算收入、回血与维修。</li><li>单位可先机动再攻击，但每回合只能攻击一次；攻击后本回合不能再机动。</li><li>玩家和 AI 完全共用同一套伤害、生产、升级、维修和运输规则。</li></ul></section>
+          <section class="rule-block"><h3>回合流程</h3><ul><li>每个联盟依次行动；回合开始时统一重置移动、结算收入、回血与维修。</li><li>单位可先机动再攻击，但每回合只能攻击一次；攻击后本回合不能再机动。</li><li>玩家和 AI 完全共用同一套伤害、生产、升级、维修和运输规则。</li></ul></section>
           <section class="rule-block"><h3>三种模式</h3><ul><li>征服：占领全部城市，并消灭全部敌对工程师后获胜。</li><li>遭遇战：敌对组全部野战部队被消灭时获胜。</li><li>守城：坚持到第12回合且仍保有己方关键城市时获胜。</li></ul></section>
           <section class="rule-block"><h3>移动与地形</h3><ul><li>陆军只能在陆地移动，不能进入海域与山脉。</li><li>海军只能在海域行动，船坞与海上堡垒也属于海上据点。</li><li>森林提供额外防御但增加移动消耗，道路降低机动成本。</li></ul></section>
           <section class="rule-block"><h3>战斗与反击</h3><ul><li>伤害由兵种攻防、当前生命、地形、驻防和克制共同决定。</li><li>只要射程覆盖，防守方就能反击；先手不再拥有单方面碾压优势。</li><li>长枪兵克制骑兵，战船克制运兵船，骑兵满机动接战时获得冲锋加成。</li></ul></section>
@@ -4167,7 +4237,7 @@
         $("playerColorSelect").insertAdjacentHTML("beforeend", `<option value="${id}" ${id === "azure" ? "selected" : ""}>${meta.name}</option>`);
       }
       for (let count = 0; count <= 6; count++) {
-        $("startUnitsSelect").insertAdjacentHTML("beforeend", `<option value="${count}" ${count === 4 ? "selected" : ""}>${count} 个 / 阵营</option>`);
+        $("startUnitsSelect").insertAdjacentHTML("beforeend", `<option value="${count}" ${count === 4 ? "selected" : ""}>${count} 个 / 联盟</option>`);
       }
       for (const [id, meta] of Object.entries(SIZES)) {
         $("sizeSelect").insertAdjacentHTML("beforeend", `<option value="${id}" ${id === "medium" ? "selected" : ""}>${meta.name}</option>`);

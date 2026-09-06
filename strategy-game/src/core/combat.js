@@ -33,15 +33,22 @@ export function matchupBonus(attacker, defender) {
   return bonusVs[defender.type] || 0;
 }
 
+function combatNation(game, owner) {
+  if (owner === 'player') return game.settings?.nation;
+  return game.aiProfiles?.[owner]?.nation;
+}
+
 export function computeDamage(game, attacker, defender, fromCell, toCell, isCounter, deterministic) {
   const attackMeta = typeMeta(attacker.type);
   const defenseMeta = typeMeta(defender.type);
   const attackSite = getSite(game, fromCell.x, fromCell.y);
   const defenseSite = getSite(game, toCell.x, toCell.y);
   const terrainDef = TERRAIN[game.terrain[toCell.y][toCell.x]].def;
-  // 阵营创新机制：圣战（马穆鲁克对异阵营攻击+2）、帝国议会（神罗3+城攻击+1，5+城防御+1）
+  // 联盟创新机制：圣战（马穆鲁克对异联盟攻击+2）、帝国议会（神罗3+城攻击+1，5+城防御+1）
   const attackerFaction = attacker.owner === 'player' ? game.settings?.faction : game.aiProfiles?.[attacker.owner]?.faction;
   const defenderFaction = defender.owner === 'player' ? game.settings?.faction : game.aiProfiles?.[defender.owner]?.faction;
+  const atkNation = combatNation(game, attacker.owner);
+  const defNation = combatNation(game, defender.owner);
   let factionAtkBonus = 0;
   let factionDefBonus = 0;
   if (attackerFaction === 'mamluk' && attackerFaction !== defenderFaction) factionAtkBonus += 2;
@@ -53,15 +60,30 @@ export function computeDamage(game, attacker, defender, fromCell, toCell, isCoun
     const hreCities = game.sites.filter(s => s.kind === 'city' && s.owner === defender.owner).length;
     if (hreCities >= 5) factionDefBonus += 1;
   }
-  const atkScholar = game.units.find(u => u.owner === attacker.owner && u.type === 'caliphScholar' && Math.abs(u.x - attacker.x) <= 2 && Math.abs(u.y - attacker.y) <= 2);
-  const defScholar = game.units.find(u => u.owner === defender.owner && u.type === 'caliphScholar' && Math.abs(u.x - defender.x) <= 2 && Math.abs(u.y - defender.y) <= 2);
+  const scholarRange = defNation === 'baghdad' || atkNation === 'baghdad' ? 3 : 2;
+  const atkScholar = game.units.find(u => u.owner === attacker.owner && u.type === 'caliphScholar' && Math.abs(u.x - attacker.x) <= scholarRange && Math.abs(u.y - attacker.y) <= scholarRange);
+  const defScholar = game.units.find(u => u.owner === defender.owner && u.type === 'caliphScholar' && Math.abs(u.x - defender.x) <= scholarRange && Math.abs(u.y - defender.y) <= scholarRange);
   const attackBuff = siteBonus(game, attackSite, attacker, 'attack') + matchupBonus(attacker, defender) + factionAtkBonus + (atkScholar ? 1 : 0);
   const defenseBuff = siteBonus(game, defenseSite, defender, 'defense') + terrainDef + factionDefBonus + (defScholar ? 1 : 0);
   const attackHpFactor = 0.55 + attacker.hp / attacker.maxHp * 0.65;
   const defendHpFactor = 0.55 + defender.hp / defender.maxHp * 0.55;
-  const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove ? attackMeta.charge : 0;
-  const base = (attackMeta.atk + attackBuff + attacker.rank) * attackHpFactor + charge;
-  const shield = (defenseMeta.def + defenseBuff) * defendHpFactor;
+  const chargeBonus = atkNation === 'austria' && attackMeta.charge ? 1 : 0;
+  const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove && defender.type !== 'pikeSquare' ? attackMeta.charge + chargeBonus : 0;
+  // 兵种级别效果：帝国近卫军守点防御+3，安南象兵对步兵+5
+  const defenderOnSite = !!getSite(game, toCell.x, toCell.y);
+  const guardBonus = defender.type === 'imperialGuard' && defenderOnSite && getSite(game, toCell.x, toCell.y).owner === defender.owner ? 3 : 0;
+  const elephantBonus = attacker.type === 'annamElephant' && defenseMeta.domain === 'land' && !defenseMeta.charge ? 5 : 0;
+  // 国家机制：攻防加成
+  let nationAtk = 0, nationDef = 0;
+  if (atkNation === 'goldenHordeCore' && attackMeta.charge) nationAtk += 1; // 金帐本部：骑兵攻击+1
+  if (atkNation === 'veniceCore' && attackMeta.domain === 'sea') nationAtk += 1; // 威尼斯本部：海军攻击+1
+  if (atkNation === 'syria' && attackerFaction !== defenderFaction) nationAtk += 1; // 叙利亚：对异联盟攻击+1
+  if (atkNation === 'whiteHorde' && defenseMeta.charge) nationAtk += 2; // 白帐：对骑兵伤害+2
+  if (atkNation === 'prussia' && !!getSite(game, toCell.x, toCell.y)) nationAtk += 3; // 普鲁士：对据点内单位伤害+3
+  if (defNation === 'blueHorde' && defenseMeta.domain === 'land' && !defenseMeta.charge) nationDef += 1; // 蓝帐：步兵防御+1
+  if (defNation === 'baghdad' && defender.type === 'caliphScholar') nationDef += 2; // 巴格达：光环单位自身防御+2
+  const base = (attackMeta.atk + attackBuff + attacker.rank + elephantBonus + nationAtk) * attackHpFactor + charge;
+  const shield = (defenseMeta.def + defenseBuff + guardBonus + nationDef) * defendHpFactor;
   const variance = deterministic ? 1 : rnd(3);
   return clamp(Math.round(base - shield * 0.58 + 2 + variance), 1, defender.hp);
 }
@@ -71,12 +93,22 @@ export function previewCombat(game, attacker, defender, fromCell, deterministic)
   const damage = computeDamage(game, attacker, defender, attackFrom, { x: defender.x, y: defender.y }, false, deterministic);
   const targetLeft = Math.max(0, defender.hp - damage);
   let counter = 0;
-  if (targetLeft > 0 && inUnitRange(typeMeta(defender.type).range, { x: defender.x, y: defender.y }, attackFrom)) {
+  if (targetLeft > 0 && inUnitRange(effectiveRange(game, defender), { x: defender.x, y: defender.y }, attackFrom)) {
     counter = clamp(Math.round(computeDamage(game, defender, attacker, { x: defender.x, y: defender.y }, attackFrom, true, deterministic) * 0.8), 0, attacker.hp);
   }
   return { damage, counter, kill: targetLeft <= 0, targetLeft, selfLeft: Math.max(0, attacker.hp - counter) };
 }
 
+function effectiveRange(game, unitEntry) {
+  const base = typeMeta(unitEntry.type).range;
+  if (base <= 1) return base;
+  const nat = combatNation(game, unitEntry.owner);
+  // 热那亚：海军远程射程+1；叙利亚：远程射程+1
+  if (nat === 'genoa' && typeMeta(unitEntry.type).domain === 'sea') return base + 1;
+  if (nat === 'syria') return base + 1;
+  return base;
+}
+
 export function canAttack(game, attacker, defender, fromCell = { x: attacker.x, y: attacker.y }) {
-  return !!attacker && !!defender && attacker.owner === game.side && !attacker.hasAttacked && areEnemies(game.teams, attacker.owner, defender.owner) && inUnitRange(typeMeta(attacker.type).range, fromCell, defender);
+  return !!attacker && !!defender && attacker.owner === game.side && !attacker.hasAttacked && areEnemies(game.teams, attacker.owner, defender.owner) && inUnitRange(effectiveRange(game, attacker), fromCell, defender);
 }
