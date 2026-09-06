@@ -3,17 +3,18 @@
 > 跨对话记忆。只记录"值得后续会话知道"的内容：踩坑、决策、偏好、根因链。纯执行细节不写这里。
 
 ## 项目速览（2026-09-05 建档）
-- 纯前端回合制策略游戏 v0.1.2；`src/main.js`（165KB 单文件，重构中）含逻辑；esbuild 打包为 `js/game.js`（IIFE，file:// 可开）。
+- 纯前端回合制策略游戏 v0.1.2；`src/main.js`（约 161KB，重构中）含逻辑；esbuild 打包为 `js/game.js`（IIFE，file:// 可开）。
+- 单位类型（15 种）：陆军 10（民兵/侦察/长枪/剑士/弓箭/弩手/工程师/骑兵/近卫/投石车）+ 海军 5（桨帆船/战船/战舰/驳船/运兵船）。远程 4：投石车、战舰。
 - 无头模拟：`sim/harness.js`（DOM shim）+ `sim/run.js`（批量对局）+ `sim/suite.js`（4 场景平衡回归）。AI 逻辑与浏览器共用同一打包产物，零分叉。
 - git：仓库在 `E:\WorkPlace\DouBao-WorkPlace\strategy-game`（外层），远程已改为 `https://github.com/secondaryexaminer-spec/DouBao-strategy-game.git`。
 - 重构进度：第一阶段抽取中——已抽 `src/core/mapgen.js`（地图生成）、`src/core/teams.js`（阵营判定）、`src/core/combat.js`（战斗计算）、`src/core/rng.js`（确定性 LCG）、`src/core/movement.js`（寻路 reachable/passable）；每次抽取均用同种子模拟验证行为等价。main.js 现约 157KB。game 对象已加 w/h 字段供 core 模块使用。
 - 待抽：`turn.js`（回合/胜负）、`economy.js`（收入/生产）、`factory.js`（单位/据点工厂）。重构为长期贯穿性工作，随新功能需求驱动。
 
 ## 已知问题清单（待处理）
-1. **推送未完成**：本地已提交（`32d3d20` 等 3 个提交），但 2026-09-05 推送时 github.com:443 连不通（无代理、TCP 失败）。网络恢复后 `git push origin main` 即可。
-2. **存档路径提示过期**：`index.html` 内两处提示写死旧路径 `E:\WorkPlace\VScode workplace\strategy-game\saves`，实际应为 `E:\WorkPlace\DouBao-WorkPlace\strategy-game\strategy-game\saves`。
-3. **`src/sim/` 空目录**：无内容，疑似遗留，可清理或忽略。
-4. **平衡性问题（待办，非重构引入）**：suite 2/4 失败——mirror-strait B 胜率 13%（期望 25-75%）、diff-gap 冷酷 50%（期望 ≥60%）。已用 worktree 对照验证为重构前既有问题。后续 AI 改良时处理。
+1. **存档路径提示过期**：`index.html` 内两处提示写死旧路径 `E:\WorkPlace\VScode workplace\strategy-game\saves`，实际应为 `E:\WorkPlace\DouBao-WorkPlace\strategy-game\strategy-game\saves`。
+2. **`src/sim/` 空目录**：无内容，疑似遗留，可清理或忽略。
+3. **平衡性问题（待办）**：新增 4 兵种后 suite 需重新跑基线。旧有问题：mirror-strait B 胜率偏低、diff-gap 冷酷优势不足。后续 AI 改良+兵种调参时统一处理。
+4. **AI 对新兵种无针对性策略**：buildScore 对桨帆船/驳船/战舰/投石车走通用评分，没有特殊规则（如远程单位走位、战舰护航）。后续 AI 改良时优化。
 
 ## 路线图（用户确认）
 1. **地基重构**（进行中）：core 层拆分（mapgen ✅ / teams ✅ / combat ✅ / rng → movement → turn）

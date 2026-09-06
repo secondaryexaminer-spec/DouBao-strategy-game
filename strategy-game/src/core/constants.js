@@ -41,7 +41,11 @@ export const TYPES = {
   cavalry: { name: '骑兵', icon: '♘', level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 48, domain: 'land', text: '高机动冲锋单位。', charge: 2 },
   guard: { name: '近卫军', icon: '🛡', level: 3, hp: 20, atk: 7, def: 7, move: 3, range: 1, cost: 54, domain: 'land', text: '重装精锐，擅长守点。' },
   warship: { name: '战船', icon: '⛵', level: 2, hp: 20, atk: 8, def: 5, move: 4, range: 2, cost: 46, domain: 'sea', text: '主力海战单位。', bonusVs: { transport: 4 } },
-  transport: { name: '运兵船', icon: '🚢', level: 2, hp: 18, atk: 2, def: 4, move: 5, range: 1, cost: 42, domain: 'sea', text: '一次最多搭载五个陆军单位。', transport: 5 }
+  transport: { name: '运兵船', icon: '🚢', level: 2, hp: 18, atk: 2, def: 4, move: 5, range: 1, cost: 42, domain: 'sea', text: '一次最多搭载五个陆军单位。', transport: 5 },
+  galley: { name: '桨帆船', icon: '🛶', level: 1, hp: 14, atk: 6, def: 3, move: 3, range: 2, cost: 30, domain: 'sea', text: '低成本海战单位，适合早期制海。', bonusVs: { transport: 2, barge: 3 } },
+  barge: { name: '驳船', icon: '⛴', level: 1, hp: 12, atk: 1, def: 2, move: 4, range: 1, cost: 26, domain: 'sea', text: '一次最多搭载三个陆军单位。', transport: 3 },
+  battleship: { name: '战舰', icon: '🛳', level: 3, hp: 14, atk: 13, def: 4, move: 3, range: 4, cost: 62, domain: 'sea', text: '远程重炮舰，射程远但脆弱。', bonusVs: { transport: 6, barge: 8, warship: 2, galley: 3 } },
+  catapult: { name: '投石车', icon: '🎯', level: 3, hp: 8, atk: 12, def: 1, move: 2, range: 4, cost: 54, domain: 'land', text: '远程攻城器械，射程远但极度脆弱。' }
 };
 
 export const SITE_META = {

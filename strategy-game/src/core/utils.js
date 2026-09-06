@@ -40,3 +40,7 @@ export function typeMeta(type) {
 export function colorOptions() {
   return Object.entries(COLOR_PRESETS);
 }
+
+// 运输船判定：任何带 transport 属性的单位类型（运兵船、驳船等）。
+export const isTransportType = type => !!TYPES[type]?.transport;
+export const isTransportUnit = unit => !!unit?.type && !!TYPES[unit.type]?.transport;

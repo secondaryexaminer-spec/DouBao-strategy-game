@@ -7,7 +7,8 @@ import {
 } from './core/constants.js';
 import {
   cellKey, rnd, clamp, dist, shuffle,
-  diagonalDist, inUnitRange, siteMeta, siteStars, typeMeta, colorOptions
+  diagonalDist, inUnitRange, siteMeta, siteStars, typeMeta, colorOptions,
+  isTransportType, isTransportUnit
 } from './core/utils.js';
 import { saveStore } from './io/storage.js';
 import { terrainFor } from './core/mapgen.js';
@@ -514,9 +515,9 @@ import { reachable } from './core/movement.js';
     };
   }
 
-  function createLoadedTransport(owner, x, y, cargoTypes = []) {
-    const transport = unit('transport', owner, x, y);
-    transport.cargo = normalizeCargoTypes(cargoTypes).map(type => createCargoPayload(owner, type));
+  function createLoadedTransport(owner, x, y, cargoTypes = [], transportType = 'transport') {
+    const transport = unit(transportType, owner, x, y);
+    transport.cargo = normalizeCargoTypes(cargoTypes, transportType).map(type => createCargoPayload(owner, type));
     return transport;
   }
 
@@ -621,8 +622,8 @@ import { reachable } from './core/movement.js';
   }
 
   function unitBuildCost(unitEntry) {
-    if (unitEntry.type === 'transport') {
-      return transportCost((unitEntry.cargo || []).map(payload => payload.type));
+    if (isTransportUnit(unitEntry)) {
+      return transportCost((unitEntry.cargo || []).map(payload => payload.type), unitEntry.type);
     }
     return typeMeta(unitEntry.type).cost;
   }
@@ -665,8 +666,8 @@ import { reachable } from './core/movement.js';
     return Object.keys(TYPES).filter(type => typeMeta(type).domain === 'land');
   }
 
-  function normalizeCargoTypes(types) {
-    return (types || []).filter(type => type && type !== 'none' && TYPES[type] && typeMeta(type).domain === 'land').slice(0, typeMeta('transport').transport);
+  function normalizeCargoTypes(types, transportType = 'transport') {
+    return (types || []).filter(type => type && type !== 'none' && TYPES[type] && typeMeta(type).domain === 'land').slice(0, typeMeta(transportType).transport);
   }
 
   function sameCell(a, b) {
@@ -705,8 +706,8 @@ import { reachable } from './core/movement.js';
     }
   }
 
-  function transportCost(cargoTypes = []) {
-    return typeMeta('transport').cost + normalizeCargoTypes(cargoTypes).reduce((sum, type) => sum + typeMeta(type).cost, 0);
+  function transportCost(cargoTypes = [], transportType = 'transport') {
+    return typeMeta(transportType).cost + normalizeCargoTypes(cargoTypes, transportType).reduce((sum, type) => sum + typeMeta(type).cost, 0);
   }
 
   function cargoLabel(type) {
@@ -901,7 +902,7 @@ import { reachable } from './core/movement.js';
     transport.cargo.push({ type: passenger.type, owner: passenger.owner, hp: passenger.hp, maxHp: passenger.maxHp, lastAttacked: passenger.lastAttacked });
     game.units = game.units.filter(entry => entry !== passenger);
     transport.acted = true;
-    log(`${typeMeta(passenger.type).name}登上了运兵船。`, 'system');
+    log(`${typeMeta(passenger.type).name}登上了${typeMeta(transport.type).name}。`, 'system');
     return true;
   }
 
@@ -1133,14 +1134,14 @@ import { reachable } from './core/movement.js';
     if (game.sites.some(siteEntry => siteEntry.kind === 'city' && siteEntry.owner !== 'neutral' && teamOf(siteEntry.owner) === team)) {
       return true;
     }
-    if (game.units.some(unitEntry => teamOf(unitEntry.owner) === team && unitEntry.type === 'transport' && unitEntry.cargo?.length)) {
+    if (game.units.some(unitEntry => teamOf(unitEntry.owner) === team && isTransportUnit(unitEntry) && unitEntry.cargo?.length)) {
       return true;
     }
     const landUnits = game.units.filter(unitEntry => teamOf(unitEntry.owner) === team && typeMeta(unitEntry.type).domain === 'land');
     if (landUnits.some(landUnitCanReachForeignCity)) {
       return true;
     }
-    const hasTransport = game.units.some(unitEntry => teamOf(unitEntry.owner) === team && unitEntry.type === 'transport');
+    const hasTransport = game.units.some(unitEntry => teamOf(unitEntry.owner) === team && isTransportUnit(unitEntry));
     const hasShipyard = game.sites.some(siteEntry => siteEntry.kind === 'shipyard' && teamOf(siteEntry.owner) === team);
     return !!landUnits.length && (hasTransport || hasShipyard);
   }
@@ -1307,9 +1308,9 @@ import { reachable } from './core/movement.js';
   }
 
   function buildAtSite(owner, siteEntry, type, options = {}) {
-    const cargoTypes = type === 'transport' ? normalizeCargoTypes(options.cargoTypes) : [];
-    const totalCost = type === 'transport' ? transportCost(cargoTypes) : typeMeta(type).cost;
-    const builtUnits = type === 'transport' ? 1 + cargoTypes.length : 1;
+    const cargoTypes = isTransportType(type) ? normalizeCargoTypes(options.cargoTypes) : [];
+    const totalCost = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
+    const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
     if (!siteEntry || siteEntry.owner !== owner || !buildableTypes(siteEntry).includes(type) || getUnit(siteEntry.x, siteEntry.y) || game.goldByOwner[owner] < totalCost) {
       return false;
     }
@@ -1318,9 +1319,9 @@ import { reachable } from './core/movement.js';
     }
     recordBuild(owner, builtUnits);
     game.goldByOwner[owner] -= totalCost;
-    if (type === 'transport') {
-      game.units.push(createLoadedTransport(owner, siteEntry.x, siteEntry.y, cargoTypes));
-      log(`${ownerName(owner)}在${siteEntry.name}下水了运兵船，预载 ${describeCargo(cargoTypes)}。`, 'system');
+    if (isTransportType(type)) {
+      game.units.push(createLoadedTransport(owner, siteEntry.x, siteEntry.y, cargoTypes, type));
+      log(`${ownerName(owner)}在${siteEntry.name}下水了${typeMeta(type).name}，预载 ${describeCargo(cargoTypes)}。`, 'system');
       incrementStat('produced', owner, 1 + cargoTypes.length);
     } else {
       game.units.push(unit(type, owner, siteEntry.x, siteEntry.y));
@@ -1385,7 +1386,7 @@ import { reachable } from './core/movement.js';
   }
 
   function canEngineerLaunch(unitEntry, type, cell, cargoTypes = []) {
-    const totalCost = type === 'transport' ? transportCost(cargoTypes) : typeMeta(type).cost;
+    const totalCost = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
     return !!unitEntry && unitEntry.type === 'engineer' && unitEntry.owner === game.side && !unitEntry.acted && !!cell && diagonalDist(unitEntry, cell) === 1 && isWaterTile(cell.x, cell.y) && !getUnit(cell.x, cell.y) && game.goldByOwner[unitEntry.owner] >= totalCost;
   }
 
@@ -1405,8 +1406,8 @@ import { reachable } from './core/movement.js';
   }
 
   function engineerLaunch(unitEntry, type, cell, cargoTypes = []) {
-    const totalCost = type === 'transport' ? transportCost(cargoTypes) : typeMeta(type).cost;
-    const builtUnits = type === 'transport' ? 1 + cargoTypes.length : 1;
+    const totalCost = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
+    const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
     if (!canEngineerLaunch(unitEntry, type, cell, cargoTypes)) {
       return false;
     }
@@ -1415,15 +1416,15 @@ import { reachable } from './core/movement.js';
     }
     recordBuild(unitEntry.owner, builtUnits);
     game.goldByOwner[unitEntry.owner] -= totalCost;
-    game.units.push(type === 'transport' ? createLoadedTransport(unitEntry.owner, cell.x, cell.y, cargoTypes) : unit(type, unitEntry.owner, cell.x, cell.y));
+    game.units.push(isTransportType(type) ? createLoadedTransport(unitEntry.owner, cell.x, cell.y, cargoTypes, type) : unit(type, unitEntry.owner, cell.x, cell.y));
     consumeAction(unitEntry);
     clearPendingOrder();
-    incrementStat('produced', unitEntry.owner, type === 'transport' ? 1 + cargoTypes.length : 1);
-    if (type === 'transport') {
+    incrementStat('produced', unitEntry.owner, isTransportType(type) ? 1 + cargoTypes.length : 1);
+    if (isTransportType(type)) {
       incrementStrat(unitEntry.owner, 'transportLaunches');
     }
     recordStatSnapshot('engineer-build');
-    log(`${ownerName(unitEntry.owner)}的工程师在海边建造了${type === 'transport' ? `运兵船（${describeCargo(cargoTypes)}）` : typeMeta(type).name}。`, 'system');
+    log(`${ownerName(unitEntry.owner)}的工程师在海边建造了${isTransportType(type) ? `${typeMeta(type).name}（${describeCargo(cargoTypes)}）` : typeMeta(type).name}。`, 'system');
     return true;
   }
 
@@ -1665,8 +1666,8 @@ import { reachable } from './core/movement.js';
       $('selActions').innerHTML = actions.join('');
       let selectionHint = meta.text;
       if (game.pendingOrder?.kind === 'engineer-launch' && unitEntry.id === game.pendingOrder.builderId) {
-        const productText = game.pendingOrder.product === 'transport'
-          ? `运兵船（${describeCargo(game.pendingOrder.cargoTypes)}）`
+        const productText = isTransportType(game.pendingOrder.product)
+          ? `${typeMeta(game.pendingOrder.product).name}（${describeCargo(game.pendingOrder.cargoTypes)}）`
           : typeMeta(game.pendingOrder.product).name;
         selectionHint = `已选择建造${productText}，请点击相邻海格下水。`;
       } else if (siteEntry) {
@@ -1698,8 +1699,11 @@ import { reachable } from './core/movement.js';
         `<div class="config-note">工程师可在相邻海格建造舰船，也可在当前位置建立可维持 ${CAMP_DURATION} 回合的临时营地。</div>`,
         transportConfigMarkup('engineerCargo', '工程师运兵船预载'),
         '<div class="engineer-actions">',
+        `<button class="btn" data-engineer-build="galley" ${warshipDisabled}>在相邻海格建造桨帆船（${typeMeta('galley').cost} 🪙）</button>`,
         `<button class="btn" data-engineer-build="warship" ${warshipDisabled}>在相邻海格建造战船（${typeMeta('warship').cost} 🪙）</button>`,
-        `<button class="btn" data-engineer-build="transport" ${transportDisabled}>在相邻海格建造运兵船（${transportCost(uiState.engineerCargo)} 🪙）</button>`,
+        `<button class="btn" data-engineer-build="battleship" ${warshipDisabled}>在相邻海格建造战舰（${typeMeta('battleship').cost} 🪙）</button>`,
+        `<button class="btn" data-engineer-build="barge" ${transportDisabled}>在相邻海格建造驳船（${transportCost(uiState.engineerCargo, 'barge')} 🪙）</button>`,
+        `<button class="btn" data-engineer-build="transport" ${transportDisabled}>在相邻海格建造运兵船（${transportCost(uiState.engineerCargo, 'transport')} 🪙）</button>`,
         `<button class="btn" data-engineer-build="camp" ${campDisabled}>建立临时营地（${CAMP_COST} 🪙）</button>`,
         '</div>',
         `<div class="engineer-pending">${engineerPendingText}</div>`,
@@ -1729,9 +1733,9 @@ import { reachable } from './core/movement.js';
       $('shipyardConfig').innerHTML = siteEntry.kind === 'shipyard' ? transportConfigMarkup('shipyardCargo', '运兵船预载') : '';
       const types = buildableTypes(siteEntry);
       $('buildGrid').innerHTML = types.length ? types.map(type => {
-        const costText = type === 'transport' ? transportCost(uiState.shipyardCargo) : typeMeta(type).cost;
+        const costText = isTransportType(type) ? transportCost(uiState.shipyardCargo, button.dataset.type) : typeMeta(type).cost;
         const disabled = !manageable || game.goldByOwner.player < costText || getUnit(siteEntry.x, siteEntry.y);
-        const suffix = type === 'transport' ? `<small> 预载：${describeCargo(uiState.shipyardCargo)}</small>` : `<small> ${domainName(typeMeta(type).domain)} ${tierName(typeMeta(type).level)}</small>`;
+        const suffix = isTransportType(type) ? `<small> 预载：${describeCargo(uiState.shipyardCargo)}</small>` : `<small> ${domainName(typeMeta(type).domain)} ${tierName(typeMeta(type).level)}</small>`;
         return `<button class="btn build" data-type="${type}" ${disabled ? 'disabled' : ''}><span>${typeMeta(type).icon} ${typeMeta(type).name}${suffix}</span><span class="cost">${costText} 🪙</span></button>`;
       }).join('') : '<div class="muted">该据点不能生产单位。</div>';
     } else {
@@ -1809,17 +1813,17 @@ import { reachable } from './core/movement.js';
       return;
     }
 
-    if (ownUnit && targetUnit && ownUnit.type === 'transport' && canLoadTransport(ownUnit, targetUnit)) {
+    if (ownUnit && targetUnit && isTransportUnit(ownUnit) && canLoadTransport(ownUnit, targetUnit)) {
       loadTransport(ownUnit, targetUnit);
       selectRef('unit', ownUnit);
       return;
     }
-    if (ownUnit && targetUnit && targetUnit.type === 'transport' && canLoadTransport(targetUnit, ownUnit)) {
+    if (ownUnit && targetUnit && isTransportUnit(targetUnit) && canLoadTransport(targetUnit, ownUnit)) {
       loadTransport(targetUnit, ownUnit);
       selectRef('unit', targetUnit);
       return;
     }
-    if (ownUnit && !targetUnit && ownUnit.type === 'transport' && canUnloadTransport(ownUnit, cell.x, cell.y)) {
+    if (ownUnit && !targetUnit && isTransportUnit(ownUnit) && canUnloadTransport(ownUnit, cell.x, cell.y)) {
       unloadTransport(ownUnit, cell.x, cell.y);
       selectRef('unit', ownUnit);
       return;
@@ -2217,7 +2221,7 @@ import { reachable } from './core/movement.js';
         const pressure = projectedPressure(owner, unitEntry, diffCfg.lookahead);
         return {
           unitEntry,
-          score: targetValue(unitEntry) + pressure * 1.5 + (pressure >= unitEntry.hp ? 16 : 0) + (unitEntry.type === 'transport' ? 8 : 0)
+          score: targetValue(unitEntry) + pressure * 1.5 + (pressure >= unitEntry.hp ? 16 : 0) + (isTransportUnit(unitEntry) ? 8 : 0)
         };
       })
       .sort((a, b) => b.score - a.score)[0]?.unitEntry || null;
@@ -2260,7 +2264,7 @@ import { reachable } from './core/movement.js';
     if (intent.expansionSite) {
       priority += Math.max(0, 6 - dist(unitEntry, intent.expansionSite));
     }
-    if (unitEntry.type === 'transport' && intent.assaultSite?.kind === 'city') {
+    if (isTransportUnit(unitEntry) && intent.assaultSite?.kind === 'city') {
       priority += 6;
     }
     if (intent.assaultSite && isBridgeheadSite(intent.assaultSite) && dist(unitEntry, intent.assaultSite) <= 3) {
@@ -2484,7 +2488,7 @@ import { reachable } from './core/movement.js';
     }
     if (type === 'warship') {
       score += siteEntry?.kind === 'shipyard' && !areAllies(siteEntry.owner, owner) ? 10 : 0;
-      const escort = game.units.find(entry => entry.owner === owner && entry.type === 'transport' && entry.cargo?.length && dist(entry, cell) <= 3);
+      const escort = game.units.find(entry => entry.owner === owner && isTransportUnit(entry) && entry.cargo?.length && dist(entry, cell) <= 3);
       if (escort) {
         score += 4;
         if (diagonalDist(cell, escort) === 1) {
@@ -2493,7 +2497,7 @@ import { reachable } from './core/movement.js';
       }
       score += nearbyEnemies(cell, owner, 2) * 1.2;
     }
-    if (type === 'transport') {
+    if (isTransportType(type)) {
       score -= nearbyEnemies(cell, owner, 2) * 4;
       score += coastal ? 2 : 0;
     }
@@ -2519,7 +2523,7 @@ import { reachable } from './core/movement.js';
       score += 7;
     }
     if (unitEntry.type === 'warship') {
-      const guardingTransport = game.units.some(entry => entry.owner === unitEntry.owner && entry.type === 'transport' && entry.cargo?.length && dist(entry, enemy) <= 3);
+      const guardingTransport = game.units.some(entry => entry.owner === unitEntry.owner && isTransportUnit(entry) && entry.cargo?.length && dist(entry, enemy) <= 3);
       if (guardingTransport) {
         score += 9;
       }
@@ -2591,9 +2595,9 @@ import { reachable } from './core/movement.js';
     const ownSea = ownUnits.filter(entry => typeMeta(entry.type).domain === 'sea').length;
     const ownLand = ownUnits.filter(entry => typeMeta(entry.type).domain === 'land').length;
     const ownWarships = ownUnits.filter(entry => entry.type === 'warship').length;
-    const ownTransports = ownUnits.filter(entry => entry.type === 'transport').length;
+    const ownTransports = ownUnits.filter(entry => isTransportUnit(entry)).length;
     const ownEngineers = ownUnits.filter(entry => entry.type === 'engineer').length;
-    const loadedTransports = ownUnits.filter(entry => entry.type === 'transport' && entry.cargo?.length).length;
+    const loadedTransports = ownUnits.filter(entry => isTransportUnit(entry) && entry.cargo?.length).length;
     // Enemy is across water and our land army already exceeds sealift -> stop piling land, build ships to move it.
     const enemyHasCities = game.sites.some(entry => entry.kind === 'city' && areEnemies(entry.owner, owner));
     const landStranded = enemyHasCities && !hasLandReachToEnemyCity(owner) && ownLand > ownTransports * FERRY_THROUGHPUT + 6;
@@ -2612,7 +2616,7 @@ import { reachable } from './core/movement.js';
     }
     if (siteEntry.kind === 'shipyard') {
       if (type === 'warship') score += enemySea * 3 + (MAPS[game.settings.map].sea ? 8 : 2) + Math.max(0, loadedTransports - ownWarships) * 4;
-      if (type === 'transport') score += (ownLand > ownSea * 2 ? 7 : 2) + (landStranded ? 22 : 0) + normalizeCargoTypes(cargoTypes).reduce((sum, cargoType) => sum + (cargoType === 'engineer' ? 6 : typeMeta(cargoType).level * 2), 0);
+      if (isTransportType(type)) score += (ownLand > ownSea * 2 ? 7 : 2) + (landStranded ? 22 : 0) + normalizeCargoTypes(cargoTypes).reduce((sum, cargoType) => sum + (cargoType === 'engineer' ? 6 : typeMeta(cargoType).level * 2), 0);
     }
     return score;
   }
@@ -2644,8 +2648,8 @@ import { reachable } from './core/movement.js';
           if (atUnitCap(owner, typeMeta(type).domain)) {
             continue;
           }
-          const cargoTypes = type === 'transport' ? chooseTransportCargo(owner, game.goldByOwner[owner], true) : [];
-          const totalCost = type === 'transport' ? transportCost(cargoTypes) : typeMeta(type).cost;
+          const cargoTypes = isTransportType(type) ? chooseTransportCargo(owner, game.goldByOwner[owner], true) : [];
+          const totalCost = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
           if (game.goldByOwner[owner] >= totalCost) {
             options.push({ siteEntry, type, cargoTypes, score: buildScore(owner, siteEntry, type, cargoTypes) });
           }
@@ -2756,7 +2760,7 @@ import { reachable } from './core/movement.js';
     // A surplus of existing land units is stranded -> build an empty transport to ferry them instead of minting new units.
     // Only once a ferry fleet already exists, so the first transports still project force with fresh cargo.
     const idleLand = game.units.filter(entry => entry.owner === owner && typeMeta(entry.type).domain === 'land').length;
-    const transportSlots = game.units.filter(entry => entry.owner === owner && entry.type === 'transport').length * FERRY_THROUGHPUT;
+    const transportSlots = game.units.filter(entry => entry.owner === owner && isTransportUnit(entry)).length * FERRY_THROUGHPUT;
     if (transportSlots >= 2 && idleLand > transportSlots + 4) {
       return [];
     }
@@ -2770,7 +2774,7 @@ import { reachable } from './core/movement.js';
     const waterCells = engineerBuildCells(engineer);
     const enemyCities = game.sites.filter(siteEntry => siteEntry.kind === 'city' && areEnemies(siteEntry.owner, owner));
     const nearestEnemyCity = enemyCities.length ? enemyCities.sort((a, b) => dist(a, engineer) - dist(b, engineer))[0] : null;
-    const hasTransport = game.units.some(unitEntry => unitEntry.owner === owner && unitEntry.type === 'transport');
+    const hasTransport = game.units.some(unitEntry => unitEntry.owner === owner && isTransportUnit(unitEntry));
     const landFrontExists = hasLandReachToEnemyCity(owner);
     const nearFront = (nearestEnemyCity && dist(engineer, nearestEnemyCity) <= 6) || game.units.some(unitEntry => areEnemies(unitEntry.owner, owner) && dist(unitEntry, engineer) <= 5);
     const safeEnough = enemyThreat(owner, engineer.x, engineer.y) < typeMeta('engineer').hp * 0.6;
@@ -2782,7 +2786,7 @@ import { reachable } from './core/movement.js';
     if (!waterCells.length) {
       return null;
     }
-    const ownedTransports = game.units.filter(unitEntry => unitEntry.owner === owner && unitEntry.type === 'transport').length;
+    const ownedTransports = game.units.filter(unitEntry => unitEntry.owner === owner && isTransportUnit(unitEntry)).length;
     const landWaiting = game.units.some(unitEntry => unitEntry.owner === owner && typeMeta(unitEntry.type).domain === 'land' && unitEntry.type !== 'engineer' && !landUnitCanReachForeignCity(unitEntry));
     const needFerry = !landFrontExists && enemyCities.length > 0 && landWaiting;
     if (needFerry && ownedTransports < 2 && game.goldByOwner[owner] >= transportCost(['engineer']) && !atUnitCap(owner, 'sea')) {
@@ -2891,7 +2895,7 @@ import { reachable } from './core/movement.js';
     if (!targets.length) {
       return false;
     }
-    const priority = entry => (entry.type === 'transport' ? 2 : entry.type === 'warship' ? 1 : 0);
+    const priority = entry => (isTransportUnit(entry) ? 2 : entry.type === 'warship' ? 1 : 0);
     targets.sort((a, b) => priority(b) - priority(a) || (a.hp - b.hp));
     attack(unitEntry, targets[0]);
     return true;
@@ -2900,7 +2904,7 @@ import { reachable } from './core/movement.js';
   function navalPatrolCell(owner, warship) {
     const line = Math.floor(H * BRIDGEHEAD_DEFEND_FRACTION);
     const enemies = game.units.filter(entry => areEnemies(entry.owner, owner));
-    const seaFocus = enemies.filter(entry => (typeMeta(entry.type).domain === 'sea' || entry.type === 'transport') && entry.y < line);
+    const seaFocus = enemies.filter(entry => (typeMeta(entry.type).domain === 'sea' || isTransportUnit(entry)) && entry.y < line);
     const focus = (seaFocus.length ? seaFocus : enemies).sort((a, b) => dist(a, warship) - dist(b, warship))[0];
     const cells = [...reachable(game, warship).keys()].map(key => {
       const [x, y] = key.split(',').map(Number);
@@ -3044,7 +3048,7 @@ import { reachable } from './core/movement.js';
           continue;
         }
       }
-      if (unitEntry.type === 'transport') {
+      if (isTransportUnit(unitEntry)) {
         if (!unitEntry.cargo.length && autoLoadAdjacent(unitEntry)) {
           finalizeUnitState(unitEntry, state, 'transport-load', false);
           refresh();
@@ -3652,7 +3656,7 @@ import { reachable } from './core/movement.js';
       if (!button || !siteEntry) {
         return;
       }
-      const cargoTypes = button.dataset.type === 'transport' ? normalizeCargoTypes(uiState.shipyardCargo) : [];
+      const cargoTypes = button.isTransportUnit(dataset) ? normalizeCargoTypes(uiState.shipyardCargo) : [];
       if (!buildAtSite('player', siteEntry, button.dataset.type, { cargoTypes })) {
         toast(buildBudgetLeft('player') <= 0 ? '本回合造兵已达上限。' : '无法在该据点生产该单位。');
       }
@@ -3717,7 +3721,7 @@ import { reachable } from './core/movement.js';
         kind: 'engineer-launch',
         builderId: engineer.id,
         product: button.dataset.engineerBuild,
-        cargoTypes: button.dataset.engineerBuild === 'transport' ? normalizeCargoTypes(uiState.engineerCargo) : []
+        cargoTypes: isTransportType(button.dataset.engineerBuild) ? normalizeCargoTypes(uiState.engineerCargo, button.dataset.engineerBuild) : []
       };
       refresh();
     });
