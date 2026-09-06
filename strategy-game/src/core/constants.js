@@ -16,11 +16,11 @@ export const COLOR_PRESETS = {
   teal: { name: '青碧', value: '#5ad2c0' },
   rose: { name: '绯红', value: '#ff8fab' }
 };
-export const CITY_NAMES = ['曙光堡', '河湾镇', '风暴关', '赤岩城', '白桦城', '鹰巢堡', '晨星镇', '铁壁城', '雾港', '长桥镇', '边陲堡', '松林城', '石桥镇', '北门关', '灰岭城', '麦田堡'];
-export const PORT_NAMES = ['东堤港', '蓝湾船坞', '风岬港', '白浪船厂', '深潮港', '南礁造船所', '碎潮军港', '北湾船坞'];
-export const FORT_NAMES = ['离岸堡', '玄潮堡', '远洋堡', '深蓝堡', '北礁堡', '灯塔堡'];
-export const OIL_NAMES = ['黑沙油田', '烈日油区', '北川油井', '灰岩油田', '长风油井', '东湾油区'];
-export const BARRACK_NAMES = ['前线军营', '铁壁军营', '远征军营', '山口军营', '河湾军营', '要塞军营'];
+export const CITY_NAMES = ['维也纳', '柏林', '慕尼黑', '布拉格', '萨莱', '基辅', '莫斯科', '威尼斯', '热那亚', '罗马', '开罗', '大马士革', '巴格达', '北京', '南京', '西安', '君士坦丁堡', '雅典', '亚历山大', '安条克', '杭州', '成都', '广州'];
+export const PORT_NAMES = ['威尼斯港', '热那亚港', '亚历山大港', '君士坦丁堡港', '泉州港', '广州港', '汉堡港', '但泽港', '克里米亚港', '阿斯特拉罕港', '贝鲁特港', '突尼斯港'];
+export const FORT_NAMES = ['霍亨索伦堡', '哈布斯堡堡', '克里米亚堡', '耶路撒冷堡', '骑士堡', '山海关', '嘉峪关', '居庸关', '科孚堡', '塞浦路斯堡'];
+export const OIL_NAMES = ['巴库油田', '里海油区', '波斯湾油井', '红海油田', '利比亚油区', '西西里油井', '阿尔萨斯油田', '鲁尔油区', '大庆油井', '胜利油田'];
+export const BARRACK_NAMES = ['条顿军营', '普鲁士军营', '金帐军营', '雇佣军营', '马穆鲁克军营', '圣战军营', '神机营', '三千营', '五军营', '骑士团军营'];
 
 export const VIEW_MAX_W = 1280;
 export const VIEW_MAX_H = 820;
@@ -54,9 +54,9 @@ export const TYPES = {
   siegeTower: { name: '攻城塔', icon: '🏰', level: 2, hp: 30, atk: 4, def: 3, move: 1, range: 1, cost: 40, domain: 'land', faction: 'hre', text: '占领据点速度×2。' },
   heavyCatapult: { name: '重型投石车', icon: '💥', level: 3, hp: 8, atk: 14, def: 1, move: 1, range: 4, cost: 58, domain: 'land', faction: 'hre', text: '对建筑伤害×1.5。' },
   // === 神罗国家特色兵种 ===
-  austrianKnight: { name: '奥地利骑士', icon: '🏇', level: 3, hp: 20, atk: 9, def: 6, move: 5, range: 1, cost: 50, domain: 'land', faction: 'hre', text: '重装冲锋骑兵。', charge: 3 },
-  prussianGrenadier: { name: '普鲁士掷弹兵', icon: '🧨', level: 2, hp: 12, atk: 10, def: 3, move: 3, range: 1, cost: 44, domain: 'land', faction: 'hre', text: '对据点内单位伤害+3。' },
-  bavarianMountaineer: { name: '巴伐利亚山地弩手', icon: '⛰', level: 2, hp: 10, atk: 7, def: 2, move: 3, range: 2, cost: 40, domain: 'land', faction: 'hre', text: '山地地形移动不消耗，驻扎山地射程+1。' },
+  austrianKnight: { name: '奥地利骑士', icon: '🏇', level: 3, hp: 20, atk: 9, def: 6, move: 5, range: 1, cost: 50, domain: 'land', faction: 'hre', nation: 'austria', text: '重装冲锋骑兵。', charge: 3 },
+  prussianGrenadier: { name: '普鲁士掷弹兵', icon: '🧨', level: 2, hp: 12, atk: 10, def: 3, move: 3, range: 1, cost: 44, domain: 'land', faction: 'hre', nation: 'prussia', text: '对据点内单位伤害+3。' },
+  bavarianMountaineer: { name: '巴伐利亚山地弩手', icon: '⛰', level: 2, hp: 10, atk: 7, def: 2, move: 3, range: 2, cost: 40, domain: 'land', faction: 'hre', nation: 'bavaria', text: '山地地形移动不消耗，驻扎山地射程+1。' },
   // === 金帐汗国（goldenHorde）阵营专属兵种 ===
   lightCavalry: { name: '轻骑兵', icon: '🐎', level: 1, hp: 12, atk: 6, def: 2, move: 6, range: 1, cost: 28, domain: 'land', faction: 'goldenHorde', text: '高机动骚扰与追击' },
   hordeCavalry: { name: '汗国骑兵', icon: '🐴', level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 42, domain: 'land', faction: 'goldenHorde', text: '通用机动打击', charge: 2 },
@@ -65,9 +65,9 @@ export const TYPES = {
   fastGalley: { name: '快速桨帆船', icon: '🚤', level: 1, hp: 12, atk: 7, def: 2, move: 5, range: 2, cost: 32, domain: 'sea', faction: 'goldenHorde', text: '海上游击，高机动低血量' },
   nomadChariot: { name: '游牧战车', icon: '🛞', level: 2, hp: 14, atk: 8, def: 2, move: 4, range: 2, cost: 46, domain: 'land', faction: 'goldenHorde', text: '移动攻城，可移动后攻击' },
   // === 金帐汗国国家特色兵种 ===
-  khanGuard: { name: '可汗亲卫', icon: '🦅', level: 3, hp: 18, atk: 10, def: 5, move: 4, range: 3, cost: 60, domain: 'land', faction: 'goldenHorde', text: '重装骑射手，汗国最强单位' },
-  camelCavalry: { name: '骆驼骑兵', icon: '🐫', level: 3, hp: 15, atk: 8, def: 4, move: 5, range: 1, cost: 44, domain: 'land', faction: 'goldenHorde', text: '沙漠平原移动不消耗，吓到敌方马匹', bonusVs: { cavalry: 3 } },
-  nomadCannon: { name: '游牧重炮', icon: '💣', level: 3, hp: 10, atk: 12, def: 1, move: 3, range: 3, cost: 52, domain: 'land', faction: 'goldenHorde', text: '移动攻城，比投石车灵活' },
+  khanGuard: { name: '可汗亲卫', icon: '🦅', level: 3, hp: 18, atk: 10, def: 5, move: 4, range: 3, cost: 60, domain: 'land', faction: 'goldenHorde', nation: 'goldenHordeCore', text: '重装骑射手，汗国最强单位' },
+  camelCavalry: { name: '骆驼骑兵', icon: '🐫', level: 3, hp: 15, atk: 8, def: 4, move: 5, range: 1, cost: 44, domain: 'land', faction: 'goldenHorde', nation: 'whiteHorde', text: '沙漠平原移动不消耗，吓到敌方马匹', bonusVs: { cavalry: 3 } },
+  nomadCannon: { name: '游牧重炮', icon: '💣', level: 3, hp: 10, atk: 12, def: 1, move: 3, range: 3, cost: 52, domain: 'land', faction: 'goldenHorde', nation: 'blueHorde', text: '移动攻城，比投石车灵活' },
   // === 威尼斯共和国（venice）阵营专属兵种 ===
   marine: { name: '海军陆战队', icon: '🪖', level: 2, hp: 14, atk: 7, def: 4, move: 3, range: 1, cost: 38, domain: 'land', faction: 'venice', text: '两栖移动，登陆后首回合攻击+3' },
   galleyWarship: { name: '桨帆战舰', icon: '🚣', level: 2, hp: 18, atk: 10, def: 4, move: 4, range: 2, cost: 50, domain: 'sea', faction: 'venice', text: '标准海战主力' },
@@ -76,9 +76,9 @@ export const TYPES = {
   tradeCaravan: { name: '商队', icon: '💰', level: 1, hp: 10, atk: 2, def: 2, move: 4, range: 1, cost: 30, domain: 'land', faction: 'venice', text: '占领据点后该据点收入+3/回合' },
   mercenarySwordsman: { name: '雇佣剑士', icon: '🗡', level: 2, hp: 15, atk: 8, def: 4, move: 3, range: 1, cost: 40, domain: 'land', faction: 'venice', text: '精锐雇佣兵' },
   // === 威尼斯国家特色兵种 ===
-  venetianGalleon: { name: '威尼斯巨舰', icon: '⚜', level: 3, hp: 20, atk: 16, def: 5, move: 2, range: 5, cost: 70, domain: 'sea', faction: 'venice', text: '超远程海军，阵营最强单位' },
-  genoeseMarine: { name: '热那亚海军弩手', icon: '🔫', level: 2, hp: 10, atk: 8, def: 2, move: 4, range: 3, cost: 44, domain: 'sea', faction: 'venice', text: '可在船上射击的海军远程单位' },
-  ragusaCaravan: { name: '拉古萨巨商队', icon: '💎', level: 2, hp: 14, atk: 3, def: 3, move: 4, range: 1, cost: 36, domain: 'land', faction: 'venice', text: '强化商队，占领据点后收入+5/回合' },
+  venetianGalleon: { name: '威尼斯巨舰', icon: '⚜', level: 3, hp: 20, atk: 16, def: 5, move: 2, range: 5, cost: 70, domain: 'sea', faction: 'venice', nation: 'veniceCore', text: '超远程海军，阵营最强单位' },
+  genoeseMarine: { name: '热那亚海军弩手', icon: '🔫', level: 2, hp: 10, atk: 8, def: 2, move: 4, range: 3, cost: 44, domain: 'sea', faction: 'venice', nation: 'genoa', text: '可在船上射击的海军远程单位' },
+  ragusaCaravan: { name: '拉古萨巨商队', icon: '💎', level: 2, hp: 14, atk: 3, def: 3, move: 4, range: 1, cost: 36, domain: 'land', faction: 'venice', nation: 'ragusa', text: '强化商队，占领据点后收入+5/回合' },
   // === 马穆鲁克苏丹国（mamluk）阵营专属兵种 ===
   mamlukCavalry: { name: '马穆鲁克骑兵', icon: '🦁', level: 3, hp: 18, atk: 9, def: 5, move: 5, range: 1, cost: 48, domain: 'land', faction: 'mamluk', text: '精锐骑兵，击杀经验×2', charge: 2 },
   jihadist: { name: '圣战者', icon: '⚡', level: 2, hp: 14, atk: 8, def: 2, move: 3, range: 1, cost: 34, domain: 'land', faction: 'mamluk', text: '对异阵营攻击+2，狂热不怕死' },
@@ -87,9 +87,9 @@ export const TYPES = {
   arabDhow: { name: '阿拉伯帆船', icon: '⚓', level: 2, hp: 16, atk: 9, def: 3, move: 5, range: 2, cost: 44, domain: 'sea', faction: 'mamluk', text: '可兼职运输2个陆军', transport: 2 },
   siegeCrossbow: { name: '攻城弩', icon: '🔨', level: 3, hp: 10, atk: 10, def: 1, move: 2, range: 3, cost: 46, domain: 'land', faction: 'mamluk', text: '对建筑伤害×1.3' },
   // === 马穆鲁克国家特色兵种 ===
-  sultanGuard: { name: '苏丹禁卫军', icon: '👑', level: 3, hp: 22, atk: 11, def: 7, move: 5, range: 1, cost: 62, domain: 'land', faction: 'mamluk', text: '超精锐骑兵，击杀后回血3', charge: 3 },
-  syrianLongbow: { name: '叙利亚长弓手', icon: '🌙', level: 3, hp: 10, atk: 9, def: 2, move: 2, range: 3, cost: 46, domain: 'land', faction: 'mamluk', text: '阵营最远陆军' },
-  caliphScholar: { name: '哈里发学者', icon: '📜', level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: 'land', faction: 'mamluk', text: '光环单位，周围2格友军攻防+1' },
+  sultanGuard: { name: '苏丹禁卫军', icon: '👑', level: 3, hp: 22, atk: 11, def: 7, move: 5, range: 1, cost: 62, domain: 'land', faction: 'mamluk', nation: 'egypt', text: '超精锐骑兵，击杀后回血3', charge: 3 },
+  syrianLongbow: { name: '叙利亚长弓手', icon: '🌙', level: 3, hp: 10, atk: 9, def: 2, move: 2, range: 3, cost: 46, domain: 'land', faction: 'mamluk', nation: 'syria', text: '阵营最远陆军' },
+  caliphScholar: { name: '哈里发学者', icon: '📜', level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: 'land', faction: 'mamluk', nation: 'baghdad', text: '光环单位，周围2格友军攻防+1' },
   // === 大明帝国（ming）阵营专属兵种 ===
   shenjiBattalion: { name: '神机营火枪兵', icon: '🎇', level: 3, hp: 8, atk: 9, def: 1, move: 2, range: 3, cost: 48, domain: 'land', faction: 'ming', text: '火器齐射，攻击溅射50%到周围1格' },
   qiArmy: { name: '戚家军', icon: '🥋', level: 2, hp: 16, atk: 7, def: 6, move: 3, range: 1, cost: 44, domain: 'land', faction: 'ming', text: '高防步兵，鸳鸯阵', bonusVs: { cavalry: 3 } },
@@ -98,9 +98,9 @@ export const TYPES = {
   treasureShip: { name: '宝船', icon: '🐉', level: 3, hp: 30, atk: 4, def: 5, move: 3, range: 1, cost: 60, domain: 'sea', faction: 'ming', transport: 10, text: '巨型运输船，可运10个陆军' },
   hongyiCannon: { name: '红夷大炮', icon: '☄️', level: 3, hp: 6, atk: 16, def: 1, move: 1, range: 5, cost: 64, domain: 'land', faction: 'ming', text: '超远程攻城，阵营最远单位' },
   // === 大明国家特色兵种 ===
-  jinyiwei: { name: '锦衣卫', icon: '🕵️', level: 2, hp: 10, atk: 8, def: 2, move: 6, range: 1, cost: 48, domain: 'land', faction: 'ming', text: '高机动侦察/暗杀，攻击后不被反击' },
-  joseonTurtleShip: { name: '朝鲜龟船', icon: '🐢', level: 3, hp: 28, atk: 7, def: 8, move: 3, range: 2, cost: 56, domain: 'sea', faction: 'ming', text: '装甲战船，反弹30%受到的伤害' },
-  annamElephant: { name: '安南象兵', icon: '🐘', level: 3, hp: 28, atk: 12, def: 4, move: 2, range: 1, cost: 58, domain: 'land', faction: 'ming', text: '巨兽单位，对步兵践踏伤害+5' }
+  jinyiwei: { name: '锦衣卫', icon: '🕵️', level: 2, hp: 10, atk: 8, def: 2, move: 6, range: 1, cost: 48, domain: 'land', faction: 'ming', nation: 'mingCore', text: '高机动侦察/暗杀，攻击后不被反击' },
+  joseonTurtleShip: { name: '朝鲜龟船', icon: '🐢', level: 3, hp: 28, atk: 7, def: 8, move: 3, range: 2, cost: 56, domain: 'sea', faction: 'ming', nation: 'joseon', text: '装甲战船，反弹30%受到的伤害' },
+  annamElephant: { name: '安南象兵', icon: '🐘', level: 3, hp: 28, atk: 12, def: 4, move: 2, range: 1, cost: 58, domain: 'land', faction: 'ming', nation: 'annam', text: '巨兽单位，对步兵践踏伤害+5' }
 };
 
 export const SITE_META = {

@@ -1033,6 +1033,15 @@ import { reachable } from './core/movement.js';
       healOwner(owner);
       grantIncome(owner);
       aiRepair(owner);
+      // 征召兵：神罗阵营每个己方城市每回合免费产1个民兵（城市格无单位时）
+      const ownerFac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+      if (ownerFac === 'hre') {
+        for (const siteEntry of game.sites.filter(s => s.kind === 'city' && s.owner === owner)) {
+          if (!getUnit(siteEntry.x, siteEntry.y)) {
+            game.units.push(unit('militia', owner, siteEntry.x, siteEntry.y));
+          }
+        }
+      }
     }
     for (const unitEntry of game.units.filter(entry => entry.owner === owner)) {
       unitEntry.maxMove = effectiveMove(unitEntry);
@@ -1287,12 +1296,30 @@ import { reachable } from './core/movement.js';
     return game.side === 'player' ? `你的回合 · ${teamOf('player')}组` : `${ownerShort(game.side)}行动中 · ${teamOf(game.side)}组`;
   }
 
+  function ownerFaction(owner) {
+    if (owner === 'player') return game.settings?.faction;
+    return game.aiProfiles?.[owner]?.faction;
+  }
+
+  function ownerNation(owner) {
+    if (owner === 'player') return game.settings?.nation;
+    return game.aiProfiles?.[owner]?.nation;
+  }
+
   function buildableTypes(siteEntry) {
     const domain = siteMeta(siteEntry.kind).domain;
     if (!domain) {
       return [];
     }
-    return Object.keys(TYPES).filter(type => typeMeta(type).domain === domain && typeMeta(type).level <= siteEntry.tier);
+    const faction = ownerFaction(siteEntry.owner);
+    const nation = ownerNation(siteEntry.owner);
+    return Object.keys(TYPES).filter(type => {
+      const meta = typeMeta(type);
+      if (meta.domain !== domain || meta.level > siteEntry.tier) return false;
+      if (meta.faction && meta.faction !== faction) return false;
+      if (meta.nation && meta.nation !== nation) return false;
+      return true;
+    });
   }
 
   function siteUpgradeCost(siteEntry) {

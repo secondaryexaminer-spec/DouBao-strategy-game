@@ -39,8 +39,22 @@ export function computeDamage(game, attacker, defender, fromCell, toCell, isCoun
   const attackSite = getSite(game, fromCell.x, fromCell.y);
   const defenseSite = getSite(game, toCell.x, toCell.y);
   const terrainDef = TERRAIN[game.terrain[toCell.y][toCell.x]].def;
-  const attackBuff = siteBonus(game, attackSite, attacker, 'attack') + matchupBonus(attacker, defender);
-  const defenseBuff = siteBonus(game, defenseSite, defender, 'defense') + terrainDef;
+  // 阵营创新机制：圣战（马穆鲁克对异阵营攻击+2）、帝国议会（神罗3+城攻击+1，5+城防御+1）
+  const attackerFaction = attacker.owner === 'player' ? game.settings?.faction : game.aiProfiles?.[attacker.owner]?.faction;
+  const defenderFaction = defender.owner === 'player' ? game.settings?.faction : game.aiProfiles?.[defender.owner]?.faction;
+  let factionAtkBonus = 0;
+  let factionDefBonus = 0;
+  if (attackerFaction === 'mamluk' && attackerFaction !== defenderFaction) factionAtkBonus += 2;
+  if (attackerFaction === 'hre') {
+    const hreCities = game.sites.filter(s => s.kind === 'city' && s.owner === attacker.owner).length;
+    if (hreCities >= 3) factionAtkBonus += 1;
+  }
+  if (defenderFaction === 'hre') {
+    const hreCities = game.sites.filter(s => s.kind === 'city' && s.owner === defender.owner).length;
+    if (hreCities >= 5) factionDefBonus += 1;
+  }
+  const attackBuff = siteBonus(game, attackSite, attacker, 'attack') + matchupBonus(attacker, defender) + factionAtkBonus;
+  const defenseBuff = siteBonus(game, defenseSite, defender, 'defense') + terrainDef + factionDefBonus;
   const attackHpFactor = 0.55 + attacker.hp / attacker.maxHp * 0.65;
   const defendHpFactor = 0.55 + defender.hp / defender.maxHp * 0.55;
   const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove ? attackMeta.charge : 0;
