@@ -4,7 +4,7 @@ import {
   VIEW_MAX_W, VIEW_MAX_H, CAMP_DURATION, CAMP_COST, CITY_INCOME_BY_TIER, UNIT_RANK_THRESHOLDS,
   TYPES, SITE_META, TERRAIN, MAPS, MODES, SIZES, ASPECTS, COMPLEX, DIFF, AGG,
   MAX_TURNS, MAX_CAMPS_PER_SIDE, MAX_STACK, FERRY_THROUGHPUT, BRIDGEHEAD_DEFEND_FRACTION,
-  FACTIONS, NATIONS
+  FACTIONS, NATIONS, SITE_NAMES_BY_NATION
 } from './core/constants.js';
 import {
   cellKey, rnd, clamp, dist, shuffle,
@@ -887,6 +887,22 @@ import { reachable } from './core/movement.js';
     const oldTier = siteEntry.tier;
     const oldOwner = siteEntry.owner;
     siteEntry.owner = unitEntry.owner;
+    // 据点占领改名：非中立据点被敌对方占领后40%概率改名（按占领者国家命名体系）
+    if (oldOwner !== 'neutral' && Math.random() < 0.4) {
+      const capturerNation = unitEntry.owner === 'player' ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
+      const nameSet = SITE_NAMES_BY_NATION?.[capturerNation];
+      if (nameSet) {
+        const kindKey = siteEntry.kind.startsWith('oil') ? 'oil' : siteEntry.kind.startsWith('barracks') ? 'barracks' : siteEntry.kind;
+        const names = nameSet[kindKey];
+        if (names && names.length) {
+          const usedNames = new Set(game.sites.map(s => s.name));
+          const available = names.filter(n => !usedNames.has(n));
+          if (available.length) {
+            siteEntry.name = available[Math.floor(Math.random() * available.length)];
+          }
+        }
+      }
+    }
     if (siteEntry.kind !== 'fortress' && Math.random() < 0.12) {
       siteEntry.tier = Math.max(1, siteEntry.tier - 1);
       siteEntry.income = Math.max(4, siteMeta(siteEntry.kind).income + (siteEntry.tier - 1) * (siteEntry.kind === 'city' ? 3 : 2));

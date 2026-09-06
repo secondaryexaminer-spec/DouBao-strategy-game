@@ -194,6 +194,113 @@
     joseon: { name: "朝鲜", faction: "ming", unique: "朝鲜龟船" },
     annam: { name: "安南", faction: "ming", unique: "安南象兵" }
   };
+  var SITE_NAMES_BY_NATION = {
+    austria: {
+      city: ["维也纳", "格拉茨", "林茨", "萨尔茨堡", "因斯布鲁克"],
+      shipyard: ["维也纳港", "林茨港", "多瑙河船坞"],
+      fortress: ["霍夫堡", "萨尔茨堡要塞", "美泉宫堡垒"],
+      oil: ["维也纳盆地油田", "阿尔卑斯油区"],
+      barracks: ["奥地利军营", "哈布斯堡军营", "维也纳卫戍营"]
+    },
+    prussia: {
+      city: ["柏林", "柯尼斯堡", "波茨坦", "但泽", "布雷斯劳"],
+      shipyard: ["基尔港", "但泽港", "波罗的海船坞"],
+      fortress: ["柏林堡垒", "柯尼斯堡要塞", "波茨坦卫城"],
+      oil: ["普鲁士油区", "波罗的海油田"],
+      barracks: ["普鲁士军营", "条顿骑士团军营", "波茨坦近卫营"]
+    },
+    bavaria: {
+      city: ["慕尼黑", "纽伦堡", "奥格斯堡", "雷根斯堡", "维尔茨堡"],
+      shipyard: ["慕尼黑河港", "多瑙河船坞"],
+      fortress: ["慕尼黑堡垒", "纽伦堡城堡", "奥格斯堡要塞"],
+      oil: ["巴伐利亚油区", "阿尔卑斯山麓油田"],
+      barracks: ["巴伐利亚军营", "山地猎兵营", "慕尼黑卫戍营"]
+    },
+    goldenHordeCore: {
+      city: ["萨莱", "阿斯特拉罕", "保加尔", "克里米亚", "塔奈"],
+      shipyard: ["萨莱港", "阿斯特拉罕港", "里海船坞"],
+      fortress: ["萨莱堡垒", "克里米亚要塞", "保加尔卫城"],
+      oil: ["里海油田", "巴库油区", "伏尔加油井"],
+      barracks: ["金帐军营", "可汗卫军营", "游牧骑兵营"]
+    },
+    whiteHorde: {
+      city: ["玉龙杰赤", "撒马尔罕", "塔什干", "布哈拉", "安集延"],
+      shipyard: ["咸海港", "玉龙杰赤港", "阿姆河船坞"],
+      fortress: ["玉龙杰赤堡垒", "撒马尔罕要塞", "布哈拉卫城"],
+      oil: ["咸海油区", "费尔干纳油田", "河中油井"],
+      barracks: ["白帐军营", "玉龙杰赤卫戍营", "河中骑兵营"]
+    },
+    blueHorde: {
+      city: ["基辅", "莫斯科", "诺夫哥罗德", "斯摩棱斯克", "切尔尼戈夫"],
+      shipyard: ["基辅港", "诺夫哥罗德港", "第聂伯河船坞"],
+      fortress: ["基辅堡垒", "莫斯科克里姆林", "诺夫哥罗德要塞"],
+      oil: ["第聂伯油区", "莫斯科盆地油田", "伏尔加上游油井"],
+      barracks: ["蓝帐军营", "基辅卫戍营", "罗斯骑兵营"]
+    },
+    veniceCore: {
+      city: ["威尼斯", "帕多瓦", "维罗纳", "特雷维索", "基奥贾"],
+      shipyard: ["威尼斯兵工厂", "基奥贾港", "亚得里亚海船坞"],
+      fortress: ["威尼斯堡垒", "维罗纳要塞", "帕多瓦卫城"],
+      oil: ["亚得里亚油区", "威尼斯湾油田"],
+      barracks: ["威尼斯军营", "共和国卫戍营", "海军陆战营"]
+    },
+    genoa: {
+      city: ["热那亚", "比萨", "佛罗伦萨", "锡耶纳", "卢卡"],
+      shipyard: ["热那亚港", "比萨港", "利古里亚海船坞"],
+      fortress: ["热那亚堡垒", "比萨要塞", "佛罗伦萨卫城"],
+      oil: ["利古里亚油区", "托斯卡纳油田"],
+      barracks: ["热那亚军营", "共和国雇佣军营", "比萨卫戍营"]
+    },
+    ragusa: {
+      city: ["拉古萨", "扎达尔", "斯普利特", "科托尔", "杜布罗夫尼克"],
+      shipyard: ["拉古萨港", "扎达尔港", "亚得里亚海南部船坞"],
+      fortress: ["拉古萨堡垒", "杜布罗夫尼克要塞", "科托尔卫城"],
+      oil: ["达尔马提亚油区", "亚得里亚海南部油田"],
+      barracks: ["拉古萨军营", "共和国卫戍营", "达尔马提亚轻步兵营"]
+    },
+    egypt: {
+      city: ["开罗", "亚历山大", "孟菲斯", "吉萨", "塞得港"],
+      shipyard: ["亚历山大港", "塞得港", "尼罗河船坞"],
+      fortress: ["开罗堡垒", "亚历山大要塞", "吉萨卫城"],
+      oil: ["苏伊士油区", "尼罗河三角洲油田", "红海油井"],
+      barracks: ["马穆鲁克军营", "开罗卫戍营", "奴隶骑兵营"]
+    },
+    syria: {
+      city: ["大马士革", "阿勒颇", "安条克", "的黎波里", "霍姆斯"],
+      shipyard: ["的黎波里港", "安条克港", "地中海东岸船坞"],
+      fortress: ["大马士革堡垒", "阿勒颇要塞", "骑士堡"],
+      oil: ["叙利亚油区", "幼发拉底河油田", "霍姆斯油井"],
+      barracks: ["叙利亚军营", "大马士革卫戍营", "阿拉伯轻骑兵营"]
+    },
+    baghdad: {
+      city: ["巴格达", "巴士拉", "库法", "摩苏尔", "纳杰夫"],
+      shipyard: ["巴士拉港", "巴格达河港", "波斯湾船坞"],
+      fortress: ["巴格达堡垒", "巴士拉要塞", "圆城卫城"],
+      oil: ["波斯湾油田", "巴士拉油区", "美索不达米亚油井"],
+      barracks: ["哈里发军营", "巴格达卫戍营", "学者护卫营"]
+    },
+    mingCore: {
+      city: ["北京", "南京", "西安", "洛阳", "开封"],
+      shipyard: ["泉州港", "广州港", "南京龙江船厂"],
+      fortress: ["山海关", "嘉峪关", "居庸关"],
+      oil: ["大庆油田", "胜利油田", "华北油区"],
+      barracks: ["神机营", "三千营", "五军营"]
+    },
+    joseon: {
+      city: ["汉城", "平壤", "开城", "釜山", "庆州"],
+      shipyard: ["釜山港", "仁川港", "朝鲜海峡船坞"],
+      fortress: ["汉城堡垒", "平壤要塞", "釜山卫城"],
+      oil: ["朝鲜湾油区", "平壤盆地油田"],
+      barracks: ["朝鲜军营", "汉城卫戍营", "龟船水师营"]
+    },
+    annam: {
+      city: ["河内", "顺化", "岘港", "海防", "升龙"],
+      shipyard: ["海防港", "岘港", "北部湾船坞"],
+      fortress: ["河内堡垒", "顺化要塞", "岘港卫城"],
+      oil: ["北部湾油区", "河内盆地油田"],
+      barracks: ["安南军营", "河内卫戍营", "象兵训练营"]
+    }
+  };
 
   // src/core/utils.js
   var cellKey = (x, y) => `${x},${y}`;
@@ -1392,6 +1499,21 @@
       const oldTier = siteEntry.tier;
       const oldOwner = siteEntry.owner;
       siteEntry.owner = unitEntry.owner;
+      if (oldOwner !== "neutral" && Math.random() < 0.4) {
+        const capturerNation = unitEntry.owner === "player" ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
+        const nameSet = SITE_NAMES_BY_NATION?.[capturerNation];
+        if (nameSet) {
+          const kindKey = siteEntry.kind.startsWith("oil") ? "oil" : siteEntry.kind.startsWith("barracks") ? "barracks" : siteEntry.kind;
+          const names = nameSet[kindKey];
+          if (names && names.length) {
+            const usedNames = new Set(game.sites.map((s) => s.name));
+            const available = names.filter((n) => !usedNames.has(n));
+            if (available.length) {
+              siteEntry.name = available[Math.floor(Math.random() * available.length)];
+            }
+          }
+        }
+      }
       if (siteEntry.kind !== "fortress" && Math.random() < 0.12) {
         siteEntry.tier = Math.max(1, siteEntry.tier - 1);
         siteEntry.income = Math.max(4, siteMeta(siteEntry.kind).income + (siteEntry.tier - 1) * (siteEntry.kind === "city" ? 3 : 2));

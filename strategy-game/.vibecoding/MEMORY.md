@@ -17,11 +17,8 @@
 - 重构进度：第一阶段抽取中——已抽 `src/core/mapgen.js`（地图生成）、`src/core/teams.js`（阵营判定）、`src/core/combat.js`（战斗计算）、`src/core/rng.js`（确定性 LCG）、`src/core/movement.js`（寻路 reachable/passable）；每次抽取均用同种子模拟验证行为等价。main.js 现约 157KB。game 对象已加 w/h 字段供 core 模块使用。
 - 待抽：`turn.js`（回合/胜负）、`economy.js`（收入/生产）、`factory.js`（单位/据点工厂）。重构为长期贯穿性工作，随新功能需求驱动。
 
-## 待办任务（创新机制完成后做）
-- **据点占领改名**：非中立据点被敌对方占领后有40%概率改名。每个国家有自己的一套覆盖所有种类据点（城市/港口/堡垒/油田/军营）的命名体系，不同国家占领后改的名字不一样。做完此条后删除本条记忆。
-
 ## 已知问题清单（待处理）
-1. **存档路径提示过期**：`index.html` 内两处提示写死旧路径 `E:\WorkPlace\VScode workplace\strategy-game\saves`，实际应为 `E:\WorkPlace\DouBao-WorkPlace\strategy-game\strategy-game\saves`。
+1. ~~存档路径提示过期~~：已修复（2026-09-06）
 2. **`src/sim/` 空目录**：无内容，疑似遗留，可清理或忽略。
 3. **平衡性问题（待办）**：新增 4 兵种后 suite 需重新跑基线。旧有问题：mirror-strait B 胜率偏低、diff-gap 冷酷优势不足。后续 AI 改良+兵种调参时统一处理。（2026-09-06 复测：加威尼斯 9 兵种后 sim:suite 3/4 通过，diff-gap 冷酷 B 胜率仍 50%，与 d2be63d 基线完全一致——确认非威尼斯兵种引入的回归）
 4. **AI 对新兵种无针对性策略**：buildScore 对桨帆船/驳船/战舰/投石车走通用评分，没有特殊规则（如远程单位走位、战舰护航）。后续 AI 改良时优化。
