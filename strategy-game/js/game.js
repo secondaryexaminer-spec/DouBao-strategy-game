@@ -84,7 +84,18 @@
     // === 马穆鲁克国家特色兵种 ===
     sultanGuard: { name: "苏丹禁卫军", icon: "👑", level: 3, hp: 22, atk: 11, def: 7, move: 5, range: 1, cost: 62, domain: "land", faction: "mamluk", text: "超精锐骑兵，击杀后回血3", charge: 3 },
     syrianLongbow: { name: "叙利亚长弓手", icon: "🌙", level: 3, hp: 10, atk: 9, def: 2, move: 2, range: 3, cost: 46, domain: "land", faction: "mamluk", text: "阵营最远陆军" },
-    caliphScholar: { name: "哈里发学者", icon: "📜", level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: "land", faction: "mamluk", text: "光环单位，周围2格友军攻防+1" }
+    caliphScholar: { name: "哈里发学者", icon: "📜", level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: "land", faction: "mamluk", text: "光环单位，周围2格友军攻防+1" },
+    // === 大明帝国（ming）阵营专属兵种 ===
+    shenjiBattalion: { name: "神机营火枪兵", icon: "🎇", level: 3, hp: 8, atk: 9, def: 1, move: 2, range: 3, cost: 48, domain: "land", faction: "ming", text: "火器齐射，攻击溅射50%到周围1格" },
+    qiArmy: { name: "戚家军", icon: "🥋", level: 2, hp: 16, atk: 7, def: 6, move: 3, range: 1, cost: 44, domain: "land", faction: "ming", text: "高防步兵，鸳鸯阵", bonusVs: { cavalry: 3 } },
+    mingCavalry: { name: "大明骑兵", icon: "🐅", level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 46, domain: "land", faction: "ming", text: "通用机动打击", charge: 2 },
+    worksEngineer: { name: "工部工程师", icon: "🏗️", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 46, domain: "land", faction: "ming", builder: true, text: "造船/建营速度+50%，费用-10%" },
+    treasureShip: { name: "宝船", icon: "🐉", level: 3, hp: 30, atk: 4, def: 5, move: 3, range: 1, cost: 60, domain: "sea", faction: "ming", transport: 10, text: "巨型运输船，可运10个陆军" },
+    hongyiCannon: { name: "红夷大炮", icon: "☄️", level: 3, hp: 6, atk: 16, def: 1, move: 1, range: 5, cost: 64, domain: "land", faction: "ming", text: "超远程攻城，阵营最远单位" },
+    // === 大明国家特色兵种 ===
+    jinyiwei: { name: "锦衣卫", icon: "🕵️", level: 2, hp: 10, atk: 8, def: 2, move: 6, range: 1, cost: 48, domain: "land", faction: "ming", text: "高机动侦察/暗杀，攻击后不被反击" },
+    joseonTurtleShip: { name: "朝鲜龟船", icon: "🐢", level: 3, hp: 28, atk: 7, def: 8, move: 3, range: 2, cost: 56, domain: "sea", faction: "ming", text: "装甲战船，反弹30%受到的伤害" },
+    annamElephant: { name: "安南象兵", icon: "🐘", level: 3, hp: 28, atk: 12, def: 4, move: 2, range: 1, cost: 58, domain: "land", faction: "ming", text: "巨兽单位，对步兵践踏伤害+5" }
   };
   var SITE_META = {
     city: { name: "城市", icon: "🏛", income: 10, maxTier: 3, upgradeCosts: { 1: 12, 2: 26 }, domain: "land" },
