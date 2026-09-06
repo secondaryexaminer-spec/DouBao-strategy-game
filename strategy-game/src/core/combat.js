@@ -53,8 +53,10 @@ export function computeDamage(game, attacker, defender, fromCell, toCell, isCoun
     const hreCities = game.sites.filter(s => s.kind === 'city' && s.owner === defender.owner).length;
     if (hreCities >= 5) factionDefBonus += 1;
   }
-  const attackBuff = siteBonus(game, attackSite, attacker, 'attack') + matchupBonus(attacker, defender) + factionAtkBonus;
-  const defenseBuff = siteBonus(game, defenseSite, defender, 'defense') + terrainDef + factionDefBonus;
+  const atkScholar = game.units.find(u => u.owner === attacker.owner && u.type === 'caliphScholar' && Math.abs(u.x - attacker.x) <= 2 && Math.abs(u.y - attacker.y) <= 2);
+  const defScholar = game.units.find(u => u.owner === defender.owner && u.type === 'caliphScholar' && Math.abs(u.x - defender.x) <= 2 && Math.abs(u.y - defender.y) <= 2);
+  const attackBuff = siteBonus(game, attackSite, attacker, 'attack') + matchupBonus(attacker, defender) + factionAtkBonus + (atkScholar ? 1 : 0);
+  const defenseBuff = siteBonus(game, defenseSite, defender, 'defense') + terrainDef + factionDefBonus + (defScholar ? 1 : 0);
   const attackHpFactor = 0.55 + attacker.hp / attacker.maxHp * 0.65;
   const defendHpFactor = 0.55 + defender.hp / defender.maxHp * 0.55;
   const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove ? attackMeta.charge : 0;

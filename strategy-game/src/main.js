@@ -697,7 +697,9 @@ import { reachable } from './core/movement.js';
     if (!unitEntry) {
       return;
     }
-    unitEntry.kills += kills;
+    const killFac = unitEntry.owner === 'player' ? game.settings?.faction : game.aiProfiles?.[unitEntry.owner]?.faction;
+    const effectiveKills = killFac === 'mamluk' ? kills * 2 : kills;
+    unitEntry.kills += effectiveKills;
     const nextRank = rankFromKills(unitEntry.kills);
     if (nextRank !== unitEntry.rank) {
       unitEntry.rank = nextRank;
@@ -709,6 +711,15 @@ import { reachable } from './core/movement.js';
 
   function transportCost(cargoTypes = [], transportType = 'transport') {
     return typeMeta(transportType).cost + normalizeCargoTypes(cargoTypes, transportType).reduce((sum, type) => sum + typeMeta(type).cost, 0);
+  }
+
+  // 雇佣兵：威尼斯造非己方阵营兵种费用+50%
+  function factionAdjustedCost(owner, type, cargoTypes = []) {
+    const base = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
+    const fac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+    const typeFac = typeMeta(type).faction;
+    const markup = fac === 'venice' && typeFac && typeFac !== 'venice' ? 1.5 : 1;
+    return Math.round(base * markup);
   }
 
   function cargoLabel(type) {
@@ -790,9 +801,26 @@ import { reachable } from './core/movement.js';
     const result = previewCombat(game, attacker, defender, { x: attacker.x, y: attacker.y }, false);
     defender.hp -= result.damage;
     defender.lastAttacked = true;
-    attacker.move = 0;
+    const atkFaction = attacker.owner === 'player' ? game.settings?.faction : game.aiProfiles?.[attacker.owner]?.faction;
+    if (atkFaction === 'goldenHorde') {
+      attacker.move = Math.max(1, Math.floor(attacker.maxMove * 0.5));
+    } else {
+      attacker.move = 0;
+    }
     attacker.hasAttacked = true;
     attacker.acted = true;
+    if (atkFaction === 'ming' && typeMeta(attacker.type).range > 1) {
+      const splashDamage = Math.max(1, Math.round(result.damage * 0.5));
+      for (const nearby of game.units.filter(u => u.owner !== attacker.owner && Math.abs(u.x - defender.x) <= 1 && Math.abs(u.y - defender.y) <= 1 && (u.x !== defender.x || u.y !== defender.y))) {
+        nearby.hp -= splashDamage;
+        log(`${typeMeta(attacker.type).name}的火器齐射溅射到${typeMeta(nearby.type).name}，造成 ${splashDamage} 点伤害。`, 'battle');
+        if (nearby.hp <= 0) {
+          incrementStat('kills', attacker.owner, 1);
+          grantKills(attacker, 1);
+          removeUnit(nearby);
+        }
+      }
+    }
     log(`${ownerName(attacker.owner)}的${typeMeta(attacker.type).name}攻击${ownerName(defender.owner)}的${typeMeta(defender.type).name}，造成 ${result.damage} 点伤害。`, 'battle');
     if (defender.hp <= 0) {
       incrementStat('kills', attacker.owner, 1 + (defender.cargo?.length || 0));
@@ -1009,7 +1037,9 @@ import { reachable } from './core/movement.js';
 
   function grantIncome(owner) {
     const base = game.sites.filter(entry => entry.owner === owner).reduce((sum, entry) => sum + entry.income, 0);
-    const gain = Math.round(base * (game.settings?.incomeMult || 1));
+    const incFac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+    const factionMult = incFac === 'venice' ? 1.25 : 1;
+    const gain = Math.round(base * (game.settings?.incomeMult || 1) * factionMult);
     game.goldByOwner[owner] += gain;
     if (gain > 0) {
       log(`${ownerName(owner)}获得 ${gain} 金币收入。`, 'gold');
@@ -1037,6 +1067,14 @@ import { reachable } from './core/movement.js';
       const ownerFac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
       if (ownerFac === 'hre') {
         for (const siteEntry of game.sites.filter(s => s.kind === 'city' && s.owner === owner)) {
+          if (!getUnit(siteEntry.x, siteEntry.y)) {
+            game.units.push(unit('militia', owner, siteEntry.x, siteEntry.y));
+          }
+        }
+      }
+      // 卫所制：大明阵营每3回合每个己方城市/军营产1个民兵
+      if (ownerFac === 'ming' && game.turn % 3 === 0) {
+        for (const siteEntry of game.sites.filter(s => (s.kind === 'city' || s.kind === 'barracks') && s.owner === owner)) {
           if (!getUnit(siteEntry.x, siteEntry.y)) {
             game.units.push(unit('militia', owner, siteEntry.x, siteEntry.y));
           }
@@ -1313,11 +1351,12 @@ import { reachable } from './core/movement.js';
     }
     const faction = ownerFaction(siteEntry.owner);
     const nation = ownerNation(siteEntry.owner);
+    const isVenice = faction === 'venice';
     return Object.keys(TYPES).filter(type => {
       const meta = typeMeta(type);
       if (meta.domain !== domain || meta.level > siteEntry.tier) return false;
-      if (meta.faction && meta.faction !== faction) return false;
-      if (meta.nation && meta.nation !== nation) return false;
+      if (!isVenice && meta.faction && meta.faction !== faction) return false;
+      if (!isVenice && meta.nation && meta.nation !== nation) return false;
       return true;
     });
   }
@@ -1337,7 +1376,7 @@ import { reachable } from './core/movement.js';
 
   function buildAtSite(owner, siteEntry, type, options = {}) {
     const cargoTypes = isTransportType(type) ? normalizeCargoTypes(options.cargoTypes) : [];
-    const totalCost = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
+    const totalCost = factionAdjustedCost(owner, type, cargoTypes);
     const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
     if (!siteEntry || siteEntry.owner !== owner || !buildableTypes(siteEntry).includes(type) || getUnit(siteEntry.x, siteEntry.y) || game.goldByOwner[owner] < totalCost) {
       return false;
@@ -1414,7 +1453,7 @@ import { reachable } from './core/movement.js';
   }
 
   function canEngineerLaunch(unitEntry, type, cell, cargoTypes = []) {
-    const totalCost = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
+    const totalCost = factionAdjustedCost(unitEntry.owner, type, cargoTypes);
     return !!unitEntry && unitEntry.type === 'engineer' && unitEntry.owner === game.side && !unitEntry.acted && !!cell && diagonalDist(unitEntry, cell) === 1 && isWaterTile(cell.x, cell.y) && !getUnit(cell.x, cell.y) && game.goldByOwner[unitEntry.owner] >= totalCost;
   }
 
@@ -1434,7 +1473,7 @@ import { reachable } from './core/movement.js';
   }
 
   function engineerLaunch(unitEntry, type, cell, cargoTypes = []) {
-    const totalCost = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
+    const totalCost = factionAdjustedCost(unitEntry.owner, type, cargoTypes);
     const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
     if (!canEngineerLaunch(unitEntry, type, cell, cargoTypes)) {
       return false;
@@ -2677,7 +2716,7 @@ import { reachable } from './core/movement.js';
             continue;
           }
           const cargoTypes = isTransportType(type) ? chooseTransportCargo(owner, game.goldByOwner[owner], true) : [];
-          const totalCost = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
+          const totalCost = factionAdjustedCost(owner, type, cargoTypes);
           if (game.goldByOwner[owner] >= totalCost) {
             options.push({ siteEntry, type, cargoTypes, score: buildScore(owner, siteEntry, type, cargoTypes) });
           }
