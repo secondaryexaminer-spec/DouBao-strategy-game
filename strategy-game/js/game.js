@@ -51,7 +51,18 @@
     // === 神罗国家特色兵种 ===
     austrianKnight: { name: "奥地利骑士", icon: "🏇", level: 3, hp: 20, atk: 9, def: 6, move: 5, range: 1, cost: 50, domain: "land", faction: "hre", text: "重装冲锋骑兵。", charge: 3 },
     prussianGrenadier: { name: "普鲁士掷弹兵", icon: "🧨", level: 2, hp: 12, atk: 10, def: 3, move: 3, range: 1, cost: 44, domain: "land", faction: "hre", text: "对据点内单位伤害+3。" },
-    bavarianMountaineer: { name: "巴伐利亚山地弩手", icon: "⛰", level: 2, hp: 10, atk: 7, def: 2, move: 3, range: 2, cost: 40, domain: "land", faction: "hre", text: "山地地形移动不消耗，驻扎山地射程+1。" }
+    bavarianMountaineer: { name: "巴伐利亚山地弩手", icon: "⛰", level: 2, hp: 10, atk: 7, def: 2, move: 3, range: 2, cost: 40, domain: "land", faction: "hre", text: "山地地形移动不消耗，驻扎山地射程+1。" },
+    // === 金帐汗国（goldenHorde）阵营专属兵种 ===
+    lightCavalry: { name: "轻骑兵", icon: "🐎", level: 1, hp: 12, atk: 6, def: 2, move: 6, range: 1, cost: 28, domain: "land", faction: "goldenHorde", text: "高机动骚扰与追击" },
+    hordeCavalry: { name: "汗国骑兵", icon: "🐴", level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 42, domain: "land", faction: "goldenHorde", text: "通用机动打击", charge: 2 },
+    horseArcher: { name: "骑射手", icon: "🥷", level: 2, hp: 11, atk: 6, def: 2, move: 4, range: 2, cost: 38, domain: "land", faction: "goldenHorde", text: "移动后可攻击，打完就跑" },
+    nomadArcher: { name: "游牧弓手", icon: "🪃", level: 1, hp: 9, atk: 5, def: 1, move: 3, range: 2, cost: 30, domain: "land", faction: "goldenHorde", text: "边走边打的轻装弓手" },
+    fastGalley: { name: "快速桨帆船", icon: "🚤", level: 1, hp: 12, atk: 7, def: 2, move: 5, range: 2, cost: 32, domain: "sea", faction: "goldenHorde", text: "海上游击，高机动低血量" },
+    nomadChariot: { name: "游牧战车", icon: "🛞", level: 2, hp: 14, atk: 8, def: 2, move: 4, range: 2, cost: 46, domain: "land", faction: "goldenHorde", text: "移动攻城，可移动后攻击" },
+    // === 金帐汗国国家特色兵种 ===
+    khanGuard: { name: "可汗亲卫", icon: "🦅", level: 3, hp: 18, atk: 10, def: 5, move: 4, range: 3, cost: 60, domain: "land", faction: "goldenHorde", text: "重装骑射手，汗国最强单位" },
+    camelCavalry: { name: "骆驼骑兵", icon: "🐫", level: 3, hp: 15, atk: 8, def: 4, move: 5, range: 1, cost: 44, domain: "land", faction: "goldenHorde", text: "沙漠平原移动不消耗，吓到敌方马匹", bonusVs: { cavalry: 3 } },
+    nomadCannon: { name: "游牧重炮", icon: "💣", level: 3, hp: 10, atk: 12, def: 1, move: 3, range: 3, cost: 52, domain: "land", faction: "goldenHorde", text: "移动攻城，比投石车灵活" }
   };
   var SITE_META = {
     city: { name: "城市", icon: "🏛", income: 10, maxTier: 3, upgradeCosts: { 1: 12, 2: 26 }, domain: "land" },
