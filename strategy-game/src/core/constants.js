@@ -78,7 +78,18 @@ export const TYPES = {
   // === 威尼斯国家特色兵种 ===
   venetianGalleon: { name: '威尼斯巨舰', icon: '⚜', level: 3, hp: 20, atk: 16, def: 5, move: 2, range: 5, cost: 70, domain: 'sea', faction: 'venice', text: '超远程海军，阵营最强单位' },
   genoeseMarine: { name: '热那亚海军弩手', icon: '🔫', level: 2, hp: 10, atk: 8, def: 2, move: 4, range: 3, cost: 44, domain: 'sea', faction: 'venice', text: '可在船上射击的海军远程单位' },
-  ragusaCaravan: { name: '拉古萨巨商队', icon: '💎', level: 2, hp: 14, atk: 3, def: 3, move: 4, range: 1, cost: 36, domain: 'land', faction: 'venice', text: '强化商队，占领据点后收入+5/回合' }
+  ragusaCaravan: { name: '拉古萨巨商队', icon: '💎', level: 2, hp: 14, atk: 3, def: 3, move: 4, range: 1, cost: 36, domain: 'land', faction: 'venice', text: '强化商队，占领据点后收入+5/回合' },
+  // === 马穆鲁克苏丹国（mamluk）阵营专属兵种 ===
+  mamlukCavalry: { name: '马穆鲁克骑兵', icon: '🦁', level: 3, hp: 18, atk: 9, def: 5, move: 5, range: 1, cost: 48, domain: 'land', faction: 'mamluk', text: '精锐骑兵，击杀经验×2', charge: 2 },
+  jihadist: { name: '圣战者', icon: '⚡', level: 2, hp: 14, atk: 8, def: 2, move: 3, range: 1, cost: 34, domain: 'land', faction: 'mamluk', text: '对异阵营攻击+2，狂热不怕死' },
+  arabArcher: { name: '阿拉伯弓手', icon: '🪶', level: 2, hp: 9, atk: 7, def: 1, move: 3, range: 2, cost: 32, domain: 'land', faction: 'mamluk', text: '沙漠地形移动不消耗' },
+  camelWarrior: { name: '骆驼骑兵', icon: '🐪', level: 3, hp: 15, atk: 8, def: 4, move: 5, range: 1, cost: 42, domain: 'land', faction: 'mamluk', text: '吓到敌方马匹', bonusVs: { cavalry: 3 } },
+  arabDhow: { name: '阿拉伯帆船', icon: '⚓', level: 2, hp: 16, atk: 9, def: 3, move: 5, range: 2, cost: 44, domain: 'sea', faction: 'mamluk', text: '可兼职运输2个陆军', transport: 2 },
+  siegeCrossbow: { name: '攻城弩', icon: '🔨', level: 3, hp: 10, atk: 10, def: 1, move: 2, range: 3, cost: 46, domain: 'land', faction: 'mamluk', text: '对建筑伤害×1.3' },
+  // === 马穆鲁克国家特色兵种 ===
+  sultanGuard: { name: '苏丹禁卫军', icon: '👑', level: 3, hp: 22, atk: 11, def: 7, move: 5, range: 1, cost: 62, domain: 'land', faction: 'mamluk', text: '超精锐骑兵，击杀后回血3', charge: 3 },
+  syrianLongbow: { name: '叙利亚长弓手', icon: '🌙', level: 3, hp: 10, atk: 9, def: 2, move: 2, range: 3, cost: 46, domain: 'land', faction: 'mamluk', text: '阵营最远陆军' },
+  caliphScholar: { name: '哈里发学者', icon: '📜', level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: 'land', faction: 'mamluk', text: '光环单位，周围2格友军攻防+1' }
 };
 
 export const SITE_META = {
