@@ -62,7 +62,18 @@
     // === 金帐汗国国家特色兵种 ===
     khanGuard: { name: "可汗亲卫", icon: "🦅", level: 3, hp: 18, atk: 10, def: 5, move: 4, range: 3, cost: 60, domain: "land", faction: "goldenHorde", text: "重装骑射手，汗国最强单位" },
     camelCavalry: { name: "骆驼骑兵", icon: "🐫", level: 3, hp: 15, atk: 8, def: 4, move: 5, range: 1, cost: 44, domain: "land", faction: "goldenHorde", text: "沙漠平原移动不消耗，吓到敌方马匹", bonusVs: { cavalry: 3 } },
-    nomadCannon: { name: "游牧重炮", icon: "💣", level: 3, hp: 10, atk: 12, def: 1, move: 3, range: 3, cost: 52, domain: "land", faction: "goldenHorde", text: "移动攻城，比投石车灵活" }
+    nomadCannon: { name: "游牧重炮", icon: "💣", level: 3, hp: 10, atk: 12, def: 1, move: 3, range: 3, cost: 52, domain: "land", faction: "goldenHorde", text: "移动攻城，比投石车灵活" },
+    // === 威尼斯共和国（venice）阵营专属兵种 ===
+    marine: { name: "海军陆战队", icon: "🪖", level: 2, hp: 14, atk: 7, def: 4, move: 3, range: 1, cost: 38, domain: "land", faction: "venice", text: "两栖移动，登陆后首回合攻击+3" },
+    galleyWarship: { name: "桨帆战舰", icon: "🚣", level: 2, hp: 18, atk: 10, def: 4, move: 4, range: 2, cost: 50, domain: "sea", faction: "venice", text: "标准海战主力" },
+    masterEngineer: { name: "大师工程师", icon: "🔧", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 48, domain: "land", faction: "venice", builder: true, text: "造船费用-20%，可建高级营地" },
+    venetianBattleship: { name: "威尼斯战舰", icon: "🔥", level: 3, hp: 12, atk: 14, def: 3, move: 3, range: 4, cost: 64, domain: "sea", faction: "venice", text: "海上远程火力压制" },
+    tradeCaravan: { name: "商队", icon: "💰", level: 1, hp: 10, atk: 2, def: 2, move: 4, range: 1, cost: 30, domain: "land", faction: "venice", text: "占领据点后该据点收入+3/回合" },
+    mercenarySwordsman: { name: "雇佣剑士", icon: "🗡", level: 2, hp: 15, atk: 8, def: 4, move: 3, range: 1, cost: 40, domain: "land", faction: "venice", text: "精锐雇佣兵" },
+    // === 威尼斯国家特色兵种 ===
+    venetianGalleon: { name: "威尼斯巨舰", icon: "⚜", level: 3, hp: 20, atk: 16, def: 5, move: 2, range: 5, cost: 70, domain: "sea", faction: "venice", text: "超远程海军，阵营最强单位" },
+    genoeseMarine: { name: "热那亚海军弩手", icon: "🔫", level: 2, hp: 10, atk: 8, def: 2, move: 4, range: 3, cost: 44, domain: "sea", faction: "venice", text: "可在船上射击的海军远程单位" },
+    ragusaCaravan: { name: "拉古萨巨商队", icon: "💎", level: 2, hp: 14, atk: 3, def: 3, move: 4, range: 1, cost: 36, domain: "land", faction: "venice", text: "强化商队，占领据点后收入+5/回合" }
   };
   var SITE_META = {
     city: { name: "城市", icon: "🏛", income: 10, maxTier: 3, upgradeCosts: { 1: 12, 2: 26 }, domain: "land" },
