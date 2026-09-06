@@ -3,7 +3,8 @@ import {
   CITY_NAMES, PORT_NAMES, FORT_NAMES, OIL_NAMES, BARRACK_NAMES,
   VIEW_MAX_W, VIEW_MAX_H, CAMP_DURATION, CAMP_COST, CITY_INCOME_BY_TIER, UNIT_RANK_THRESHOLDS,
   TYPES, SITE_META, TERRAIN, MAPS, MODES, SIZES, ASPECTS, COMPLEX, DIFF, AGG,
-  MAX_TURNS, MAX_CAMPS_PER_SIDE, MAX_STACK, FERRY_THROUGHPUT, BRIDGEHEAD_DEFEND_FRACTION
+  MAX_TURNS, MAX_CAMPS_PER_SIDE, MAX_STACK, FERRY_THROUGHPUT, BRIDGEHEAD_DEFEND_FRACTION,
+  FACTIONS, NATIONS
 } from './core/constants.js';
 import {
   cellKey, rnd, clamp, dist, shuffle,
@@ -3178,7 +3179,9 @@ import { reachable } from './core/movement.js';
         deploy: $('deploymentSelect').value,
         buildCap: Number($('buildCap').value),
         incomeMult: Number($('incomeMult').value),
-        siteDensity: Number($('siteDensity').value)
+        siteDensity: Number($('siteDensity').value),
+        faction: $('factionSelect').value,
+        nation: $('nationSelect').value
       }
     };
     game.sites = makeCities(aiCount, game.settings.size, game.settings.spread);
@@ -3197,6 +3200,7 @@ import { reachable } from './core/movement.js';
     $('statsSummary').innerHTML = '';
     recordStatSnapshot('deploy');
     log(`版本 0.1.2 战局开始：${MAPS[game.settings.map].name} · ${SIZES[game.settings.size].name} · ${ASPECTS[game.settings.aspect].name} ${W}×${H} · ${game.sites.filter(entry => entry.kind === 'city').length} 座城市 · ${game.sites.filter(entry => entry.kind === 'shipyard').length} 座船坞。`, 'system');
+    log(`玩家阵营：${FACTIONS[game.settings.faction]?.name || game.settings.faction} · ${NATIONS[game.settings.nation]?.name || game.settings.nation}（特色兵种：${NATIONS[game.settings.nation]?.unique || '待定'}）`, 'system');
     const focusCity = game.sites.find(entry => entry.kind === 'city' && entry.owner === (spectator ? owners[0] : 'player'));
     if (focusCity) {
       centerCamOn(focusCity.x, focusCity.y);
@@ -3610,6 +3614,22 @@ import { reachable } from './core/movement.js';
     for (const [id, name] of Object.entries(MODES)) {
       $('modeSelect').insertAdjacentHTML('beforeend', `<option value="${id}">${name}</option>`);
     }
+    for (const [id, meta] of Object.entries(FACTIONS)) {
+      $('factionSelect').insertAdjacentHTML('beforeend', `<option value="${id}">${meta.name}</option>`);
+    }
+    $('factionSelect').value = 'hre';
+    function refreshNationSelect() {
+      const factionId = $('factionSelect').value;
+      const select = $('nationSelect');
+      select.innerHTML = '';
+      for (const [id, meta] of Object.entries(NATIONS)) {
+        if (meta.faction === factionId) {
+          select.insertAdjacentHTML('beforeend', `<option value="${id}">${meta.name}（特色：${meta.unique}）</option>`);
+        }
+      }
+    }
+    refreshNationSelect();
+    $('factionSelect').addEventListener('change', refreshNationSelect);
     for (let count = 1; count <= 7; count++) {
       $('aiSelect').insertAdjacentHTML('beforeend', `<option value="${count}">${count} 名</option>`);
     }

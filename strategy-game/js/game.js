@@ -111,6 +111,30 @@
   var MAX_STACK = 3;
   var FERRY_THROUGHPUT = 3;
   var BRIDGEHEAD_DEFEND_FRACTION = 0.75;
+  var FACTIONS = {
+    hre: { name: "神圣罗马帝国", short: "神罗", color: "#c0392b", style: "重甲推进、阵地消耗", mechanic: "征召兵 / 帝国议会" },
+    goldenHorde: { name: "金帐汗国", short: "金帐", color: "#e67e22", style: "骑射游击、打完就跑", mechanic: "打完就跑 / 游牧营地" },
+    venice: { name: "威尼斯共和国", short: "威尼斯", color: "#27ae60", style: "海军霸权、商业贸易", mechanic: "商路经济 / 雇佣兵" },
+    mamluk: { name: "马穆鲁克苏丹国", short: "马穆鲁克", color: "#8e44ad", style: "精锐骑兵、宗教狂热", mechanic: "圣战 / 马穆鲁克精锐" },
+    ming: { name: "大明帝国", short: "大明", color: "#d4ac0d", style: "火器齐射、工程建筑", mechanic: "火器齐射 / 卫所制" }
+  };
+  var NATIONS = {
+    austria: { name: "奥地利", faction: "hre", unique: "奥地利骑士" },
+    prussia: { name: "普鲁士", faction: "hre", unique: "普鲁士掷弹兵" },
+    bavaria: { name: "巴伐利亚", faction: "hre", unique: "巴伐利亚山地弩手" },
+    goldenHordeCore: { name: "金帐本部", faction: "goldenHorde", unique: "可汗亲卫" },
+    whiteHorde: { name: "白帐汗国", faction: "goldenHorde", unique: "骆驼骑兵" },
+    blueHorde: { name: "蓝帐汗国", faction: "goldenHorde", unique: "游牧重炮" },
+    veniceCore: { name: "威尼斯", faction: "venice", unique: "威尼斯巨舰" },
+    genoa: { name: "热那亚", faction: "venice", unique: "热那亚海军弩手" },
+    ragusa: { name: "拉古萨", faction: "venice", unique: "拉古萨巨商队" },
+    egypt: { name: "埃及", faction: "mamluk", unique: "苏丹禁卫军" },
+    syria: { name: "叙利亚", faction: "mamluk", unique: "叙利亚长弓手" },
+    baghdad: { name: "巴格达", faction: "mamluk", unique: "哈里发学者" },
+    mingCore: { name: "大明", faction: "ming", unique: "锦衣卫" },
+    joseon: { name: "朝鲜", faction: "ming", unique: "朝鲜龟船" },
+    annam: { name: "安南", faction: "ming", unique: "安南象兵" }
+  };
 
   // src/core/utils.js
   var cellKey = (x, y) => `${x},${y}`;
@@ -3408,7 +3432,9 @@
           deploy: $("deploymentSelect").value,
           buildCap: Number($("buildCap").value),
           incomeMult: Number($("incomeMult").value),
-          siteDensity: Number($("siteDensity").value)
+          siteDensity: Number($("siteDensity").value),
+          faction: $("factionSelect").value,
+          nation: $("nationSelect").value
         }
       };
       game.sites = makeCities(aiCount, game.settings.size, game.settings.spread);
@@ -3427,6 +3453,7 @@
       $("statsSummary").innerHTML = "";
       recordStatSnapshot("deploy");
       log(`版本 0.1.2 战局开始：${MAPS[game.settings.map].name} · ${SIZES[game.settings.size].name} · ${ASPECTS[game.settings.aspect].name} ${W}×${H} · ${game.sites.filter((entry) => entry.kind === "city").length} 座城市 · ${game.sites.filter((entry) => entry.kind === "shipyard").length} 座船坞。`, "system");
+      log(`玩家阵营：${FACTIONS[game.settings.faction]?.name || game.settings.faction} · ${NATIONS[game.settings.nation]?.name || game.settings.nation}（特色兵种：${NATIONS[game.settings.nation]?.unique || "待定"}）`, "system");
       const focusCity = game.sites.find((entry) => entry.kind === "city" && entry.owner === (spectator ? owners[0] : "player"));
       if (focusCity) {
         centerCamOn(focusCity.x, focusCity.y);
@@ -3816,6 +3843,22 @@
       for (const [id, name] of Object.entries(MODES)) {
         $("modeSelect").insertAdjacentHTML("beforeend", `<option value="${id}">${name}</option>`);
       }
+      for (const [id, meta] of Object.entries(FACTIONS)) {
+        $("factionSelect").insertAdjacentHTML("beforeend", `<option value="${id}">${meta.name}</option>`);
+      }
+      $("factionSelect").value = "hre";
+      function refreshNationSelect() {
+        const factionId = $("factionSelect").value;
+        const select = $("nationSelect");
+        select.innerHTML = "";
+        for (const [id, meta] of Object.entries(NATIONS)) {
+          if (meta.faction === factionId) {
+            select.insertAdjacentHTML("beforeend", `<option value="${id}">${meta.name}（特色：${meta.unique}）</option>`);
+          }
+        }
+      }
+      refreshNationSelect();
+      $("factionSelect").addEventListener("change", refreshNationSelect);
       for (let count = 1; count <= 7; count++) {
         $("aiSelect").insertAdjacentHTML("beforeend", `<option value="${count}">${count} 名</option>`);
       }
