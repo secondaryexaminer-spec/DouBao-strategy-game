@@ -684,10 +684,10 @@
   var MULTIPLIER = 1664525;
   var INCREMENT = 1013904223;
   function createRng(seed) {
-    let state5 = seed >>> 0;
+    let state6 = seed >>> 0;
     return function rng() {
-      state5 = state5 * MULTIPLIER + INCREMENT >>> 0;
-      return state5 / MODULUS;
+      state6 = state6 * MULTIPLIER + INCREMENT >>> 0;
+      return state6 / MODULUS;
     };
   }
 
@@ -2578,6 +2578,502 @@
     return debug;
   }
 
+  // src/factions/mamluk/veterancy.js
+  var VETERANCY = {
+    // 特殊单位集合（适用 veterancy 的精锐单位）
+    specialUnits: ["mamlukCavalry", "camelWarrior", "sultanGuard"],
+    // 经验
+    xpPerDamage: 1,
+    // 造成伤害：每点 1 XP
+    killXp: 10,
+    // 击杀
+    keyBattleXp: 5,
+    // 关键战斗：击杀 level>=3 单位
+    captureXp: 15,
+    // 占领据点
+    // 等级阈值
+    v1Threshold: 30,
+    v2Threshold: 70,
+    v3Threshold: 120,
+    eliteThreshold: 200,
+    // Veteran 效果数值
+    v1Atk: 1,
+    // Veteran 1：攻击 +1
+    v2Def: 1,
+    // Veteran 2：防御 +1
+    chargeBonus: 3,
+    // Veteran 3 冲锋强化：满移动力攻击伤害 +3
+    bloodlustHeal: 2,
+    // Veteran 3 击杀回血：击杀后回血 +2
+    swiftMove: 1,
+    // Veteran 3 移动力强化：永久移动力 +1
+    // 埃及（尼罗河补给）
+    egyptHeal: 2,
+    // 河边/城市附近每回合额外回血
+    egyptXpMult: 1.5,
+    // 河边经验获取 ×1.5
+    egyptRange: 1,
+    // "附近" = Chebyshev 距离 <=1（8 邻域含自身）
+    // 叙利亚（长弓火线）
+    syriaFocusBonus: 2,
+    // 协同射击：第二个远程单位攻击同一目标伤害 +2
+    // 巴格达（学术指令）
+    tacticDef: 1,
+    // 守势：范围内己方单位被攻击伤害 -1
+    tacticOff: 2,
+    // 进攻：范围内己方单位攻击伤害 +2
+    tacticDrillHeal: 1,
+    // 整军：范围内己方单位每回合回血 +1
+    mobilityPrepay: 1
+    // 机动：每回合首次移动消耗 -1（beforeMove 预支）
+  };
+  var MORALE = {
+    init: 50,
+    // 初始士气（0~100）
+    high: 70,
+    // 高士气阈值
+    low: 30,
+    // 低士气阈值
+    killGain: 1,
+    // 精锐击杀 +1
+    lostPenalty: 3,
+    // 精锐死亡 -3
+    highXpMult: 1.5,
+    // 高士气：精锐经验获取 ×1.5
+    cavalryFirstHitBonus: 2,
+    // 高士气：骑兵每回合首次攻击伤害 +2
+    greenPenalty: 1
+    // 低士气：新生兵攻击 -1
+  };
+  var ELITE_LOST = {
+    gold: 15,
+    // 精锐死亡金币损失
+    moralePenalty: 3
+    // 精锐死亡士气损失（与 MORALE.lostPenalty 一致）
+  };
+  var state5 = {
+    lastGameRef: null,
+    // 换局检测
+    veterancy: /* @__PURE__ */ new Map(),
+    // unitId -> {unitId, xp, veteranLevel, kills, lastPromotionTurn, promotion, elite, dead}
+    morale: /* @__PURE__ */ new Map(),
+    // owner -> number（0~100，懒初始化 50）
+    fireLine: /* @__PURE__ */ new Map(),
+    // defenderId -> {lastAttackerId, count}（叙利亚协同射击，回合内）
+    cavalryFirstHit: /* @__PURE__ */ new Set(),
+    // unitId：本回合已享受高士气骑兵首攻（每回合重置）
+    mobilityUsed: /* @__PURE__ */ new Set(),
+    // unitId：本回合已享受机动预支（每回合重置）
+    v3Requested: /* @__PURE__ */ new Set(),
+    // unitId：已请求过 Veteran 3 晋升决策（去重）
+    tactic: /* @__PURE__ */ new Map()
+    // owner -> 'defensive'|'offensive'|'mobility'|'drill'（巴格达学术指令）
+  };
+  function resetState5() {
+    state5.veterancy.clear();
+    state5.morale.clear();
+    state5.fireLine.clear();
+    state5.cavalryFirstHit.clear();
+    state5.mobilityUsed.clear();
+    state5.v3Requested.clear();
+    state5.tactic.clear();
+  }
+  function syncGameRef5(ctx) {
+    if (ctx && ctx.game !== state5.lastGameRef) {
+      resetState5();
+      state5.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests5() {
+    resetState5();
+    state5.lastGameRef = null;
+  }
+  function isMamlukOwner(ctx, owner) {
+    return !!owner && ctx.ownerFaction(owner) === "mamluk";
+  }
+  function isSpecialUnit(ctx, unit) {
+    return !!unit && VETERANCY.specialUnits.includes(unit.type);
+  }
+  function ensureRecord(unit) {
+    let rec = state5.veterancy.get(unit.id);
+    if (!rec) {
+      rec = {
+        unitId: unit.id,
+        xp: 0,
+        veteranLevel: 0,
+        kills: 0,
+        lastPromotionTurn: 0,
+        promotion: null,
+        // 'charge' | 'bloodlust' | 'swift'
+        elite: false,
+        dead: false
+      };
+      state5.veterancy.set(unit.id, rec);
+    }
+    return rec;
+  }
+  function getMorale(owner) {
+    if (!state5.morale.has(owner)) state5.morale.set(owner, MORALE.init);
+    return state5.morale.get(owner);
+  }
+  function adjustMorale(owner, delta) {
+    const v = Math.max(0, Math.min(100, getMorale(owner) + delta));
+    state5.morale.set(owner, v);
+    return v;
+  }
+  function nearNile(ctx, unit) {
+    const g = ctx.game;
+    if (!g || !g.terrain || !unit) return false;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = unit.x + dx;
+        const y = unit.y + dy;
+        if (x < 0 || y < 0 || x >= g.w || y >= g.h) continue;
+        if (g.terrain[y] && g.terrain[y][x] === "water") return true;
+      }
+    }
+    for (const s of g.sites || []) {
+      if (s.kind !== "city") continue;
+      if (Math.abs(s.x - unit.x) <= VETERANCY.egyptRange && Math.abs(s.y - unit.y) <= VETERANCY.egyptRange && ctx.areAllies(g.teams, s.owner, unit.owner)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function hasScholarNearby(ctx, unit) {
+    if (!unit) return false;
+    const range = ctx.ownerNation(unit.owner) === "baghdad" ? 3 : 2;
+    return ctx.game.units.some((u) => u.owner === unit.owner && u.type === "caliphScholar" && Math.abs(u.x - unit.x) <= range && Math.abs(u.y - unit.y) <= range);
+  }
+  function checkLevel(ctx, unit, rec) {
+    if (rec.veteranLevel < 1 && rec.xp >= VETERANCY.v1Threshold) {
+      rec.veteranLevel = 1;
+      rec.lastPromotionTurn = ctx.game.turn || 0;
+      ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Veteran 1（攻击 +1）。`, "system");
+    }
+    if (rec.veteranLevel < 2 && rec.xp >= VETERANCY.v2Threshold) {
+      rec.veteranLevel = 2;
+      rec.lastPromotionTurn = ctx.game.turn || 0;
+      ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Veteran 2（防御 +1）。`, "system");
+    }
+    if (rec.veteranLevel === 2 && rec.xp >= VETERANCY.v3Threshold && !rec.promotion) {
+      if (unit.owner === "player") {
+        if (!state5.v3Requested.has(unit.id)) {
+          requestV3Decision(ctx, unit, rec);
+        }
+      }
+    }
+    if (rec.veteranLevel >= 3 && !rec.elite && rec.xp >= VETERANCY.eliteThreshold) {
+      rec.elite = true;
+      rec.lastPromotionTurn = ctx.game.turn || 0;
+      ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Elite——马穆鲁克精英！`, "system");
+    }
+  }
+  function addXp(ctx, unit, amount, reason) {
+    if (!isSpecialUnit(ctx, unit)) return;
+    syncGameRef5(ctx);
+    const rec = ensureRecord(unit);
+    if (rec.dead) return;
+    let xp = amount;
+    if (ctx.ownerNation(unit.owner) === "egypt" && nearNile(ctx, unit)) {
+      xp = Math.round(xp * VETERANCY.egyptXpMult);
+    }
+    if (getMorale(unit.owner) >= MORALE.high) {
+      xp = Math.round(xp * MORALE.highXpMult);
+    }
+    rec.xp += xp;
+    if (reason === "kill") rec.kills += 1;
+    checkLevel(ctx, unit, rec);
+  }
+  var V3_OPTION_LABEL = { charge: "冲锋强化", bloodlust: "击杀回血", swift: "移动力强化" };
+  function requestV3Decision(ctx, unit, rec) {
+    state5.v3Requested.add(unit.id);
+    const options = [
+      { id: "charge", label: "冲锋强化", description: "满移动力发起攻击时伤害 +3。" },
+      { id: "bloodlust", label: "击杀回血", description: "击杀单位后回复 2 点生命。" },
+      { id: "swift", label: "移动力强化", description: "永久移动力 +1。" }
+    ];
+    return ctx.requestDecision(`mlV3_${unit.id}`, {
+      owner: unit.owner,
+      unitId: unit.id,
+      title: "精锐晋升",
+      description: `${ctx.typeMeta(unit.type).name}达到 Veteran 3，选择晋升方向。`,
+      options,
+      onResolve: (choiceId) => {
+        applyV3Promotion(ctx, unit, choiceId);
+      }
+    });
+  }
+  function applyV3Promotion(ctx, unit, choiceId) {
+    const rec = state5.veterancy.get(unit.id);
+    if (!rec || rec.dead) return false;
+    if (!["charge", "bloodlust", "swift"].includes(choiceId)) return false;
+    rec.promotion = choiceId;
+    rec.veteranLevel = 3;
+    rec.lastPromotionTurn = ctx.game.turn || 0;
+    if (choiceId === "swift") {
+      unit.baseMove += VETERANCY.swiftMove;
+      unit.maxMove += VETERANCY.swiftMove;
+      unit.move += VETERANCY.swiftMove;
+    }
+    ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Veteran 3（${V3_OPTION_LABEL[choiceId]}）。`, "system");
+    return true;
+  }
+  var TACTIC_OPTIONS = [
+    { id: "defensive", label: "守势", description: "学者范围内己方单位被攻击时伤害 -1。" },
+    { id: "offensive", label: "进攻", description: "学者范围内己方单位攻击时伤害 +2。" },
+    { id: "mobility", label: "机动", description: "学者范围内己方单位每回合首次移动消耗 -1。" },
+    { id: "drill", label: "整军", description: "学者范围内己方单位每回合恢复 1 点生命。" }
+  ];
+  function requestTacticDecision(ctx, owner) {
+    if (ctx.ownerNation(owner) !== "baghdad") return null;
+    const scholar = ctx.game.units.find((u) => u.owner === owner && u.type === "caliphScholar");
+    if (!scholar) return null;
+    return ctx.requestDecision(`mlTactic_${owner}_${ctx.game.turn || 0}`, {
+      owner,
+      unitId: scholar.id,
+      title: "学术指令",
+      description: "哈里发学者每回合可选择一种战术，替代固定光环。",
+      options: TACTIC_OPTIONS,
+      onResolve: (choiceId) => {
+        if (TACTIC_OPTIONS.some((o) => o.id === choiceId)) {
+          state5.tactic.set(owner, choiceId);
+          ctx.log(`巴格达发布学术指令：${TACTIC_OPTIONS.find((o) => o.id === choiceId).label}。`, "system");
+        }
+      }
+    });
+  }
+  function onAfterAttack4(ctx, payload) {
+    const { attacker, defender, result, defenderDead, attackerDead } = payload || {};
+    if (!attacker || !defender) return;
+    syncGameRef5(ctx);
+    const atkIsMamluk = isMamlukOwner(ctx, attacker.owner);
+    const defIsMamluk = isMamlukOwner(ctx, defender.owner);
+    if (!atkIsMamluk && !defIsMamluk) return;
+    if (atkIsMamluk && isSpecialUnit(ctx, attacker)) {
+      const damage = result && result.damage || 0;
+      if (damage > 0) addXp(ctx, attacker, damage * VETERANCY.xpPerDamage, "damage");
+      if (defenderDead) {
+        addXp(ctx, attacker, VETERANCY.killXp, "kill");
+        const dmeta = ctx.typeMeta(defender.type);
+        if (dmeta && dmeta.level >= 3) addXp(ctx, attacker, VETERANCY.keyBattleXp, "keyBattle");
+        const rec = state5.veterancy.get(attacker.id);
+        if (!attackerDead && rec && !rec.dead && rec.promotion === "bloodlust") {
+          attacker.hp = Math.min(attacker.maxHp, attacker.hp + VETERANCY.bloodlustHeal);
+        }
+        if (rec && !rec.dead && rec.veteranLevel >= 1) {
+          adjustMorale(attacker.owner, MORALE.killGain);
+        }
+      }
+    }
+    if (defIsMamluk && defenderDead) {
+      eliteLost(ctx, defender);
+    }
+    if (atkIsMamluk && attackerDead) {
+      eliteLost(ctx, attacker);
+    }
+  }
+  function eliteLost(ctx, unit) {
+    const rec = state5.veterancy.get(unit.id);
+    if (!rec || rec.dead || rec.veteranLevel < 3) return;
+    const paid = ctx.spendGold(unit.owner, ELITE_LOST.gold);
+    adjustMorale(unit.owner, -ELITE_LOST.moralePenalty);
+    rec.xp = 0;
+    rec.veteranLevel = 0;
+    rec.dead = true;
+    ctx.log(
+      `${ctx.typeMeta(unit.type).name}（精锐）阵亡：损失${ELITE_LOST.gold}金币${paid ? "" : "（金币不足，实际未扣）"}，军团士气 -${ELITE_LOST.moralePenalty}，累计经验清零。`,
+      "warning"
+    );
+  }
+  function onSiteCaptured2(ctx, payload) {
+    const { unit } = payload || {};
+    if (!unit) return;
+    syncGameRef5(ctx);
+    if (!isMamlukOwner(ctx, unit.owner)) return;
+    addXp(ctx, unit, VETERANCY.captureXp, "capture");
+  }
+  function onBeforeAttack2(ctx, payload) {
+    const { attacker, defender, result, isCounter } = payload || {};
+    if (!attacker || !defender || !result || !result.damage) return;
+    syncGameRef5(ctx);
+    const atkMamluk = isMamlukOwner(ctx, attacker.owner);
+    const defMamluk = isMamlukOwner(ctx, defender.owner);
+    if (!atkMamluk && !defMamluk) return;
+    if (atkMamluk) {
+      const rec = state5.veterancy.get(attacker.id);
+      const morale = getMorale(attacker.owner);
+      if (morale <= MORALE.low && (!rec || rec.dead || rec.veteranLevel === 0)) {
+        result.damage = Math.max(1, result.damage - MORALE.greenPenalty);
+      }
+      if (rec && !rec.dead && rec.veteranLevel >= 1) {
+        result.damage += VETERANCY.v1Atk;
+      }
+      if (rec && !rec.dead && rec.promotion === "charge" && attacker.move === attacker.maxMove) {
+        result.damage += VETERANCY.chargeBonus;
+      }
+      if (morale >= MORALE.high && isSpecialUnit(ctx, attacker) && !state5.cavalryFirstHit.has(attacker.id)) {
+        result.damage += MORALE.cavalryFirstHitBonus;
+        state5.cavalryFirstHit.add(attacker.id);
+        ctx.log(`${ctx.typeMeta(attacker.type).name}趁高涨士气发起猛攻，伤害 +${MORALE.cavalryFirstHitBonus}。`, "battle");
+      }
+      if (ctx.ownerNation(attacker.owner) === "baghdad" && state5.tactic.get(attacker.owner) === "offensive" && hasScholarNearby(ctx, attacker)) {
+        result.damage += VETERANCY.tacticOff;
+      }
+      if (ctx.ownerNation(attacker.owner) === "syria") {
+        applySyriaFocus(ctx, attacker, defender, result);
+      }
+    }
+    if (defMamluk) {
+      const drec = state5.veterancy.get(defender.id);
+      if (drec && !drec.dead && drec.veteranLevel >= 2) {
+        result.damage = Math.max(1, result.damage - VETERANCY.v2Def);
+      }
+      if (ctx.ownerNation(defender.owner) === "baghdad" && state5.tactic.get(defender.owner) === "defensive" && hasScholarNearby(ctx, defender)) {
+        result.damage = Math.max(1, result.damage - VETERANCY.tacticDef);
+      }
+    }
+  }
+  function applySyriaFocus(ctx, attacker, defender, result) {
+    const meta = ctx.typeMeta(attacker.type);
+    if (!meta || meta.range <= 1) return;
+    const prev = state5.fireLine.get(defender.id);
+    if (prev && prev.lastAttackerId !== attacker.id) {
+      result.damage += VETERANCY.syriaFocusBonus;
+      prev.count += 1;
+      prev.lastAttackerId = attacker.id;
+      ctx.log(`${ctx.typeMeta(attacker.type).name}与友军协同射击，伤害 +${VETERANCY.syriaFocusBonus}。`, "battle");
+    } else {
+      state5.fireLine.set(defender.id, { lastAttackerId: attacker.id, count: prev ? prev.count : 1 });
+    }
+  }
+  function onBeforeMove4(ctx, payload) {
+    const { unit, to } = payload || {};
+    if (!unit || !to) return;
+    if (unit.move <= 0) return;
+    syncGameRef5(ctx);
+    if (ctx.ownerNation(unit.owner) !== "baghdad") return;
+    if (state5.tactic.get(unit.owner) !== "mobility") return;
+    if (state5.mobilityUsed.has(unit.id)) return;
+    if (!hasScholarNearby(ctx, unit)) return;
+    unit.move += VETERANCY.mobilityPrepay;
+    state5.mobilityUsed.add(unit.id);
+  }
+  function onTurnStart5(ctx, payload) {
+    const owner = payload && payload.owner;
+    syncGameRef5(ctx);
+    state5.cavalryFirstHit.clear();
+    state5.fireLine.clear();
+    state5.mobilityUsed.clear();
+    if (!isMamlukOwner(ctx, owner)) return;
+    if (ctx.ownerNation(owner) === "egypt") {
+      for (const u of ctx.game.units) {
+        if (u.owner !== owner || u.hp >= u.maxHp) continue;
+        if (!isSpecialUnit(ctx, u)) continue;
+        if (nearNile(ctx, u)) {
+          u.hp = Math.min(u.maxHp, u.hp + VETERANCY.egyptHeal);
+          ctx.log(`${ctx.typeMeta(u.type).name}获得尼罗河补给，回复 ${VETERANCY.egyptHeal} 点生命。`, "battle");
+        }
+      }
+    }
+    if (ctx.ownerNation(owner) === "baghdad" && state5.tactic.get(owner) === "drill") {
+      for (const u of ctx.game.units) {
+        if (u.owner !== owner || u.hp >= u.maxHp) continue;
+        if (hasScholarNearby(ctx, u)) {
+          u.hp = Math.min(u.maxHp, u.hp + VETERANCY.tacticDrillHeal);
+        }
+      }
+    }
+    if (owner === "player") {
+      for (const u of ctx.game.units) {
+        if (u.owner !== owner) continue;
+        const rec = state5.veterancy.get(u.id);
+        if (rec && !rec.dead && rec.veteranLevel === 2 && rec.xp >= VETERANCY.v3Threshold && !rec.promotion && !state5.v3Requested.has(u.id)) {
+          requestV3Decision(ctx, u, rec);
+        }
+      }
+      requestTacticDecision(ctx, owner);
+    }
+  }
+  function attachDebug4(ctx) {
+    const debug = {
+      config: () => ({
+        veterancy: { ...VETERANCY },
+        morale: { ...MORALE },
+        eliteLost: { ...ELITE_LOST },
+        specialUnits: [...VETERANCY.specialUnits]
+      }),
+      // 当前全部精锐档案（可选按 owner 过滤）
+      veterancy: (owner) => {
+        const out = [];
+        for (const [id, r] of state5.veterancy) {
+          const u = ctx.game.units.find((x) => x.id === id);
+          if (owner && (!u || u.owner !== owner)) continue;
+          out.push({ ...r, type: u ? u.type : null, x: u ? u.x : null, y: u ? u.y : null });
+        }
+        return out;
+      },
+      morale: (owner) => owner ? { [owner]: getMorale(owner) } : Object.fromEntries([...state5.morale.entries()]),
+      tactic: (owner) => owner ? { [owner]: state5.tactic.get(owner) || null } : Object.fromEntries([...state5.tactic.entries()]),
+      state: () => ({
+        fireLine: [...state5.fireLine.entries()].map(([id, f]) => ({ defender: id, ...f })),
+        cavalryFirstHit: [...state5.cavalryFirstHit],
+        mobilityUsed: [...state5.mobilityUsed],
+        v3Requested: [...state5.v3Requested]
+      }),
+      // 手动为某单位请求 V3 晋升决策（UI 阶段前的测试入口）
+      requestV3: (unitId) => {
+        const u = ctx.game.units.find((x) => x.id === unitId);
+        if (!u) return null;
+        const rec = state5.veterancy.get(unitId);
+        if (!rec) return null;
+        return requestV3Decision(ctx, u, rec);
+      },
+      // 手动为某 owner 请求学术指令决策
+      requestTactic: (owner) => requestTacticDecision(ctx, owner),
+      // 查看未决马穆鲁克决策（浏览器 UI 阶段前的手动测试入口）
+      pending: (owner) => ctx.getPendingDecisions(owner || "player").filter((r) => String(r.id || "").startsWith("ml")).map((r) => ({ id: r.id, title: r.context.title, options: r.context.options.map((o) => o.id) })),
+      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId),
+      reset: () => resetForTests5()
+    };
+    if (typeof globalThis !== "undefined") globalThis.__mamlukDebug = debug;
+    return debug;
+  }
+
+  // src/factions/mamluk/mamlukRules.js
+  var mamlukSystem = {
+    id: "mamluk",
+    // 注册时调用一次：挂载 debug/test 入口（globalThis.__mamlukDebug，浏览器控制台可用）
+    init(ctx) {
+      attachDebug4(ctx);
+    },
+    // turnStart：回合级标记重置 + 埃及尼罗河补给回血 + 巴格达整军回血 +
+    //            玩家决策请求（Veteran 3 晋升兜底 / 学者学术指令）
+    onTurnStart(ctx, payload) {
+      onTurnStart5(ctx, payload);
+    },
+    // beforeMove：巴格达机动战术（范围内单位每回合首次移动消耗 -1，预支 +1）
+    onBeforeMove(ctx, payload) {
+      onBeforeMove4(ctx, payload);
+    },
+    // beforeAttack：士气影响 + Veteran 1/2/3 效果 + 巴格达战术 + 叙利亚协同射击（只改 result.damage）
+    onBeforeAttack(ctx, payload) {
+      onBeforeAttack2(ctx, payload);
+    },
+    // afterAttack：攻击方经验/击杀回血/士气 + 双方精锐死亡惩罚（eliteLost）
+    onAfterAttack(ctx, payload) {
+      onAfterAttack4(ctx, payload);
+    },
+    // siteCaptured：精锐占领据点 → 经验
+    onSiteCaptured(ctx, payload) {
+      onSiteCaptured2(ctx, payload);
+    },
+    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
+    reset() {
+      resetForTests5();
+    }
+  };
+
   // src/main.js
   (() => {
     "use strict";
@@ -2628,6 +3124,7 @@
       factionRegistry.register("hre", hreSystem, factionCtx);
       factionRegistry.register("goldenHorde", goldenHordeSystem, factionCtx);
       factionRegistry.register("venice", veniceSystem, factionCtx);
+      factionRegistry.register("mamluk", mamlukSystem, factionCtx);
       return factionCtx;
     }
     let fastSim = false;
@@ -4801,7 +5298,7 @@
     }
     function bestObjective(owner, unitEntry, intent = null) {
       const defaultAgg = AGG[game.aiProfiles?.[owner]?.agg || "balanced"] || AGG.balanced;
-      const state5 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
+      const state6 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
       const memory = frontMemory(owner);
       const isSea = typeMeta(unitEntry.type).domain === "sea";
       const pool = isSea ? [intent?.navalSite, intent?.assaultSite, intent?.expansionSite, ...intent?.alternateSites || []] : [intent?.expansionSite, intent?.assaultSite, ...intent?.alternateSites || []];
@@ -4818,7 +5315,7 @@
         if (strategicSiteValue(siteEntry, owner, unitEntry) <= 0) {
           return;
         }
-        if (state5.rerouteTurns > 0 && state5.failedObjectiveKey === `site:${key}`) {
+        if (state6.rerouteTurns > 0 && state6.failedObjectiveKey === `site:${key}`) {
           return;
         }
         if (memory[`site:${key}`]?.cooldown > 0) {
@@ -4951,9 +5448,9 @@
       }
       return distances;
     }
-    function finalizeUnitState(unitEntry, state5, objectiveKey, movedThisTurn) {
-      const stalledTurns = movedThisTurn ? 0 : state5.stalledTurns + 1;
-      const rerouteTurns = movedThisTurn ? Math.max(0, state5.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state5.rerouteTurns - 1);
+    function finalizeUnitState(unitEntry, state6, objectiveKey, movedThisTurn) {
+      const stalledTurns = movedThisTurn ? 0 : state6.stalledTurns + 1;
+      const rerouteTurns = movedThisTurn ? Math.max(0, state6.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state6.rerouteTurns - 1);
       rememberFrontOutcome(unitEntry.owner, objectiveKey, movedThisTurn);
       if (!movedThisTurn && stalledTurns >= 2 && objectiveKey.startsWith("site:")) {
         const siteId = objectiveKey.slice(5);
@@ -4964,7 +5461,7 @@
         lastPosition: { x: unitEntry.x, y: unitEntry.y },
         stalledTurns,
         rerouteTurns,
-        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state5.failedObjectiveKey
+        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state6.failedObjectiveKey
       };
     }
     function targetValue(unitEntry) {
@@ -5047,7 +5544,7 @@
     function chooseAction(owner, unitEntry, profile, intent = null) {
       const diffCfg = DIFF[profile.diff];
       const aggCfg = AGG[profile.agg];
-      const state5 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
+      const state6 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
       const cells = [...reachable(game, unitEntry).entries()].map(([key, cost]) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y, cost };
@@ -5066,13 +5563,13 @@
         const moveScore = objective ? (currentPath - nextPath) * 2.9 * diffCfg.lookahead * aggCfg.push : 0;
         const supportScore = friendSupport(owner, cell.x, cell.y);
         const riskPenalty = enemyThreat(owner, cell.x, cell.y) * diffCfg.risk * aggCfg.preserve * 0.9;
-        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state5.stalledTurns * 0.7);
+        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state6.stalledTurns * 0.7);
         const siteEntry = getSite2(cell.x, cell.y);
         const captureScore = siteEntry ? strategicSiteValue(siteEntry, owner, unitEntry) + cityEconomyValue(siteEntry, owner) : 0;
         const intentBonus = intent?.assaultSite ? Math.max(0, dist(unitEntry, intent.assaultSite) - dist(cell, intent.assaultSite)) * 1.4 * assaultMag : 0;
         const expansionBonus = intent?.expansionSite ? Math.max(0, dist(unitEntry, intent.expansionSite) - dist(cell, intent.expansionSite)) * 1.9 * aggCfg.expansion * expansionMag : 0;
         const futureCityPressure = objective ? Math.max(0, futureReach(unitEntry, diffCfg.lookahead) - dist(cell, objective)) * 0.35 : 0;
-        const rerouteBonus = state5.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
+        const rerouteBonus = state6.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
         const terrainBonus = game.terrain[cell.y][cell.x] === "forest" ? 3 * aggCfg.forestBias : 0;
         const roleBonus = unitRoleCellBonus(owner, unitEntry, cell, intent);
         const base = moveScore + supportScore + captureScore + intentBonus + expansionBonus + futureCityPressure + rerouteBonus + terrainBonus + roleBonus - riskPenalty - congestionPenalty;
@@ -5500,18 +5997,18 @@
         if (!game.units.includes(unitEntry)) {
           continue;
         }
-        const state5 = computeUnitState(unitEntry);
+        const state6 = computeUnitState(unitEntry);
         const startCell = { x: unitEntry.x, y: unitEntry.y };
         const assaultKey = intent.assaultSite ? `site:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}` : null;
         const bridgeheadCooldown = assaultKey ? memory[assaultKey]?.cooldown > 0 : false;
-        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state5.rerouteTurns > 0 && state5.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
+        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state6.rerouteTurns > 0 && state6.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
         if (bridgeheadBlocked && typeMeta(unitEntry.type).domain === "land" && profile.agg !== "reckless") {
           const retreatCell = bestRetreatCell(owner, unitEntry, intent.assaultSite);
           if (retreatCell && (retreatCell.x !== unitEntry.x || retreatCell.y !== unitEntry.y)) {
             incrementStrat(owner, "retreats");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}从桥头暂退，在 ${intent.assaultSite.name} 方向重整。`);
             moveUnit(unitEntry, retreatCell.x, retreatCell.y);
-            finalizeUnitState(unitEntry, state5, assaultKey || "idle", true);
+            finalizeUnitState(unitEntry, state6, assaultKey || "idle", true);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -5523,7 +6020,7 @@
           if (currentFrontline >= 4 && isReserveCandidate && unitEntry.hp > unitEntry.maxHp * 0.65) {
             incrementStrat(owner, "reserves");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}作为桥头预备队待机。`);
-            finalizeUnitState(unitEntry, state5, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
+            finalizeUnitState(unitEntry, state6, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -5531,13 +6028,13 @@
         }
         if (isTransportUnit(unitEntry)) {
           if (!unitEntry.cargo.length && autoLoadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state5, "transport-load", false);
+            finalizeUnitState(unitEntry, state6, "transport-load", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (unitEntry.cargo.length && autoUnloadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state5, "transport-unload", false);
+            finalizeUnitState(unitEntry, state6, "transport-unload", false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -5550,7 +6047,7 @@
             if (unitEntry.cargo.length && (nearThreat === 0 || escortAdjacent)) {
               autoUnloadAdjacent(unitEntry);
             }
-            finalizeUnitState(unitEntry, state5, `landing:${cellKey(landing.x, landing.y)}`, moved);
+            finalizeUnitState(unitEntry, state6, `landing:${cellKey(landing.x, landing.y)}`, moved);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -5559,13 +6056,13 @@
         if (unitEntry.type === "engineer") {
           const engineerChoice = engineerBuildChoice(owner, unitEntry, intent);
           if (engineerChoice?.kind === "camp" && buildCamp(unitEntry)) {
-            finalizeUnitState(unitEntry, state5, "camp", false);
+            finalizeUnitState(unitEntry, state6, "camp", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (engineerChoice?.cell && engineerLaunch(unitEntry, engineerChoice.kind, engineerChoice.cell, engineerChoice.cargoTypes || [])) {
-            finalizeUnitState(unitEntry, state5, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
+            finalizeUnitState(unitEntry, state6, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -5580,7 +6077,7 @@
         if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(game, unitEntry, choice.target)) {
           attack(unitEntry, choice.target);
         }
-        finalizeUnitState(unitEntry, state5, objectiveKey, !sameCell(startCell, unitEntry));
+        finalizeUnitState(unitEntry, state6, objectiveKey, !sameCell(startCell, unitEntry));
         refresh();
         await pause(aiStepDelay());
       }

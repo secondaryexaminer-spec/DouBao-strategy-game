@@ -26,6 +26,7 @@ import { factionRegistry } from './factions/factionRegistry.js';
 import { hreSystem } from './factions/hre/hreRules.js';
 import { goldenHordeSystem } from './factions/goldenHorde/goldenHordeRules.js';
 import { veniceSystem } from './factions/venice/veniceRules.js';
+import { mamlukSystem } from './factions/mamluk/mamlukRules.js';
 
 (() => {
   'use strict';
@@ -79,6 +80,7 @@ import { veniceSystem } from './factions/venice/veniceRules.js';
     factionRegistry.register('hre', hreSystem, factionCtx);
     factionRegistry.register('goldenHorde', goldenHordeSystem, factionCtx);
     factionRegistry.register('venice', veniceSystem, factionCtx);
+    factionRegistry.register('mamluk', mamlukSystem, factionCtx);
     return factionCtx;
   }
   let fastSim = false;
