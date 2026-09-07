@@ -40,6 +40,9 @@
 - 附属对话 handoff 规范见施工图第五节（路径/必读/硬约束/验收/回传）。
 
 ## 踩坑与根因（按时间倒序）
+- **2026-09-07 · 威尼斯集成：契约 §6 钩子签名表整体与实现不符**：registry 实际分发 `system[hook](ctx, payload)`，契约 v1.2 表却写 `(ctx, owner, initial)`/`(ctx, owner, amountRef)` 等多参数写法——HRE/GH 一直按 `(ctx, payload)` 实现没冲突，威尼斯 `onIncomeCalculated` 明确要求"直接改 amount"才暴露。教训：**契约签名必须以 factionRegistry 分发代码为准**（威尼斯对话已把这条写进它的经验教训）。已修契约 §6 统一为 `(ctx, payload)` + v1.3 变更记录。
+- **2026-09-07 · incomeCalculated 引用语义验证**：main.js grantIncome 用 `incomePayload = {owner, amount}` 对象 emit 后读 `incomePayload.amount`（引用传递）——威尼斯 `payload.amount += bonus` 真实生效。判定：**凡"钩子改 payload 字段"必须核实 main.js 埋点是否引用语义**，不能只看 harness（harness 自己构造 payload 会假绿）。
+- **2026-09-07 · 威尼斯接线后默认局零变化、注入局差异符合画像**：transportLaunches 6→29（海军经济+港口半价产船）、engineerLandings 71→1、sells 301→125、retreats 89→0；AI 不建路线/不借贷（决策仅 player）→ 被动机制（垄断产船/1.25 收入）对 AI 生效是设计意图。
 - **2026-09-07 · 威尼斯 handoff-C 要点**：贸易网络 Layer4 = tradeRoute facility（**关系型实体**，data 承载 startNode/endNode/path/income；与 HRE 区域性工事、金帐单体营地不同）；收益 +2/回合、每额外 2 格 +1、单条上限 +5；敌军进入路线 → tradeDisrupted（**优先挂 incomeCalculated 检测，不新增埋点**）；三国机制 = 威尼斯海上垄断（2/3 港）/ 热那亚银行信用借贷（+15、3×-6、不能无限用）/ 拉古萨中立商港（敌方港口→交易港）；雇佣兵升级涉 main.js 旧机制 → 附属对话不得自行改，先报告。文件 `.vibecoding/v0.2-handoff-C-venice.md`。
 - **2026-09-07 · 金帐接线后默认局零变化、金帐局有差异**：注册 `goldenHorde` 后，默认 hre 局（isGoldenHordeOwner=false）所有钩子空转 → seed777 逐项与基线一致；金帐镜像局统计变化（engineerLandings 5→17、transportLaunches 10→23、sells 65→50）证明掠袭经济真实生效——**接线验证的判定标准：默认局必须零变化，注入局必须有可解释差异**。
 - **2026-09-07 · 金帐模块级跨局状态靠 syncGameRef 自动清**：`state.slowUsedThisTurn` 是模块级 Set，不是 game 状态；raiding.onTurnStart 每回合对比 `ctx.game` 引用，换局自动 reset——无需在 newGame 额外接线（与 HRE 用 facility 存储不同）。

@@ -307,17 +307,18 @@ export const factionRegistry = {
 {
   id: 'hre',                          // 必须与 FACTIONS key 一致
   init(ctx),                          // 注册时调用一次，ctx = factionContext
-  onTurnStart(ctx, owner, initial),
-  onTurnEnd(ctx, owner),
-  onBeforeMove(ctx, payload),         // payload = {unit, from, to}，可设 cancel
-  onAfterMove(ctx, payload),
+  // 事件钩子统一签名：system[hook](ctx, payload) —— factionRegistry 实际分发方式（v1.3 更正，勿用多参数写法）
+  onTurnStart(ctx, payload),          // payload = {owner, initial}
+  onTurnEnd(ctx, payload),            // payload = {owner}
+  onBeforeMove(ctx, payload),         // payload = {unit, from, to, cancel}，可设 cancel
+  onAfterMove(ctx, payload),          // payload = {unit, from, to}
   onBeforeAttack(ctx, payload),       // payload = {attacker, defender, result, ...}，可改 result
-  onAfterAttack(ctx, payload),
-  onUnitCreated(ctx, unit),
-  onUnitKilled(ctx, killer, victim, context),
-  onSiteCaptured(ctx, unit, site, oldOwner),
-  onIncomeCalculated(ctx, owner, amountRef),  // amountRef = {amount}，可改 amount
-  onProductionCompleted(ctx, owner, payload),
+  onAfterAttack(ctx, payload),        // payload = {attacker, defender, result, ...}
+  onUnitCreated(ctx, payload),        // payload = {unit}
+  onUnitKilled(ctx, payload),         // payload = {killer, victim, context}（GH-09 对齐前 killer 暂为 null）
+  onSiteCaptured(ctx, payload),       // payload = {unit, site, oldOwner}
+  onIncomeCalculated(ctx, payload),   // payload = {owner, amount}，amount 可改（引用语义，见 §2.2）
+  onProductionCompleted(ctx, payload),// payload = {owner, unit, site, kind}
 }
 ```
 
@@ -384,6 +385,12 @@ export const factionRegistry = {
 
 ### 变更记录
 
+**v1.3（2026-09-07，威尼斯集成验收）**
+- `§6` 事件钩子签名表统一更正为 `system[hook](ctx, payload)`（原表多参数写法 `(ctx, owner, initial)`、`(ctx, unit, site, oldOwner)`、`(ctx, owner, amountRef)` 与 factionRegistry 实际分发不符；HRE/GH/威尼斯均按 `(ctx, payload)` 实现，威尼斯 `onIncomeCalculated` 实测依赖引用语义改 `payload.amount`）。
+- 威尼斯模块接入：`factionRegistry.register('venice', veniceSystem, ctx)`（注册顺序 hre → goldenHorde → venice）。
+- 贸易网络为**关系型连接实体**（facility type `tradeRoute`，data 承载 startNode/endNode/path/income/status）：`damageFacility/expireFacility` 不适用，销毁语义 = 端点失效（收入侧复核移除）；`tradingPort`（拉古萨商港）为可被攻击摧毁的实体（hp6，50% 掉耐久）。
+- 收入类机制挂载指引：`incomeCalculated` payload 为引用语义，`payload.amount` 可直接加减（贸易收益/交易港/贷款还款先例）。
+
 **v1.2（2026-09-07，GH 接口申请单处理）**
 - `§3.1` `tickStatuses` 签名更正为 `tickStatuses(aliveUnitIds)`（原文档写 owner，与实际实现不符）；新增 tick 接线语义与 `raided turns=3` 推导结论（见 §3.1 说明块）。
 - `§2.2` `productionCompleted` 已埋点：buildAtSite 成功分支 emit `{owner, unit, site, kind:'unit'|'ship'}`；金帐营地生产等联盟侧生产路径由联盟模块用 `ctx.events.emit('productionCompleted', ...)` 广播同一事件。
@@ -402,4 +409,4 @@ export const factionRegistry = {
 
 ---
 
-*契约版本：v1.2（2026-09-07，GH 接口申请单处理后）*
+*契约版本：v1.3（2026-09-07，威尼斯集成后）*

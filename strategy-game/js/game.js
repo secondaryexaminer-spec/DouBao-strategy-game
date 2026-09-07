@@ -684,10 +684,10 @@
   var MULTIPLIER = 1664525;
   var INCREMENT = 1013904223;
   function createRng(seed) {
-    let state4 = seed >>> 0;
+    let state5 = seed >>> 0;
     return function rng() {
-      state4 = state4 * MULTIPLIER + INCREMENT >>> 0;
-      return state4 / MODULUS;
+      state5 = state5 * MULTIPLIER + INCREMENT >>> 0;
+      return state5 / MODULUS;
     };
   }
 
@@ -1906,6 +1906,678 @@
     return debug;
   }
 
+  // src/factions/venice/tradeNetwork.js
+  var TRADE_ROUTE = {
+    type: "tradeRoute",
+    baseIncome: 2,
+    // 每条路线每回合基础 +2 金币
+    incomeCap: 5,
+    // 单条路线长度收益上限 +5（避免无限堆路线；国家加成叠加在其后）
+    maxRoutes: 6,
+    // 每方同时存在的贸易路线上限（防设施无限增长）
+    navyGuardRange: 3,
+    // 海路保护：水域路径格需有己方海军在切比雪夫距离 <= 3 内
+    pathSearchCap: 800,
+    // 路径 BFS 最大探索格数（防性能失控）
+    maxCandidates: 5
+    // 单回合最多列出 5 条候选路线（决策选项上限）
+  };
+  var TRADING_PORT = {
+    type: "tradingPort",
+    // 拉古萨中立商港（facility，放在敌方港口格上）
+    income: 2,
+    // 每个交易港每回合 +2 金币（少量收入）
+    hp: 6,
+    // 可被攻击摧毁（每击按伤害 50% 掉耐久）
+    chipRatio: 0.5,
+    // 敌军攻击交易港格上单位时对交易港的耐久伤害比例
+    maxPorts: 2,
+    // 每方同时存在的交易港上限
+    caravanRange: 1
+    // 拉古萨商队需在港口切比雪夫距离 <= 1 内（"商队进入"）
+  };
+  var GENOA_LOAN = {
+    amount: 15,
+    // 立即获得 +15 金币
+    repayment: 6,
+    // 随后 3 回合每回合 -6
+    repayTurns: 3,
+    cooldown: 2,
+    // 还清后冷却 2 回合（不可无限使用）
+    maxLoans: 3
+    // 每局借贷硬上限
+  };
+  var MERCENARY = {
+    // 按当前战场购买"临时解决方案"（规格书 §7.4）：反骑买长枪兵 / 攻城买投石车 / 远程买弩手
+    // 价格沿用现有"非己方联盟兵种 ×1.5"概念（factionAdjustedCost 的 venice markup）
+    markup: 1.5,
+    options: [
+      { id: "spearman", label: "长枪兵", baseCost: 26, desc: "临时方案·反骑：克制骑兵冲锋，坚实前排" },
+      { id: "crossbow", label: "弩手", baseCost: 40, desc: "临时方案·远程：高爆发集火" },
+      { id: "catapult", label: "投石车", baseCost: 54, desc: "临时方案·攻城：远程攻城器械，射程远但脆弱" }
+    ]
+  };
+  var TRADE_TYPES2 = /* @__PURE__ */ new Set(["tradeCaravan", "ragusaCaravan"]);
+  var NODE_SITE_KINDS = /* @__PURE__ */ new Set(["city", "shipyard", "fortress"]);
+  var state4 = {
+    lastGameRef: null,
+    loans: /* @__PURE__ */ new Map(),
+    // owner -> { active, repayLeft, cooldownLeft, totalTaken }
+    mercs: /* @__PURE__ */ new Map()
+    // owner -> { lastBuyTurn }（每回合最多买 1 次）
+  };
+  function resetState4() {
+    state4.loans.clear();
+    state4.mercs.clear();
+  }
+  function syncGameRef4(ctx) {
+    if (ctx && ctx.game !== state4.lastGameRef) {
+      resetState4();
+      state4.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests4() {
+    resetState4();
+    state4.lastGameRef = null;
+  }
+  function debugState2() {
+    return {
+      loans: [...state4.loans.entries()].map(([o, r]) => ({ owner: o, ...r })),
+      mercs: [...state4.mercs.entries()].map(([o, r]) => ({ owner: o, ...r }))
+    };
+  }
+  function isVeniceOwner(ctx, owner) {
+    return !!owner && ctx.ownerFaction(owner) === "venice";
+  }
+  function isCaravanType(type) {
+    return !!type && TRADE_TYPES2.has(type);
+  }
+  function isWater(ctx, x, y) {
+    const g = ctx.game;
+    return !!(g && g.terrain[y] && g.terrain[y][x] === "water");
+  }
+  function ownerShipyards(ctx, owner) {
+    return ctx.game.sites.filter((s) => s.kind === "shipyard" && s.owner === owner);
+  }
+  function typeLabel(ctx, type) {
+    const m = ctx.typeMeta(type);
+    return m && m.name ? m.name : type;
+  }
+  function routeLabel(route) {
+    const d = route.data || {};
+    return `贸易路线（${d.startNode ? d.startNode.x + "," + d.startNode.y : route.x + "," + route.y} ↔ ${d.endNode ? d.endNode.x + "," + d.endNode.y : ""}）`;
+  }
+  var NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  function findPath(ctx, owner, a, b) {
+    if (!a || !b) return null;
+    if (a.x === b.x && a.y === b.y) return null;
+    const g = ctx.game;
+    const w = g.w, h = g.h;
+    const startKey = `${a.x},${a.y}`;
+    const goalKey = `${b.x},${b.y}`;
+    const prev = /* @__PURE__ */ new Map([[startKey, null]]);
+    const queue = [[a.x, a.y]];
+    let head = 0;
+    while (head < queue.length && head < TRADE_ROUTE.pathSearchCap) {
+      const [x, y] = queue[head++];
+      const key = `${x},${y}`;
+      if (key === goalKey) break;
+      for (const [dx, dy] of NEIGHBORS) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        if (g.terrain[ny][nx] === "mountain") continue;
+        const nk = `${nx},${ny}`;
+        if (prev.has(nk)) continue;
+        const isEndpoint = nx === a.x && ny === a.y || nx === b.x && ny === b.y;
+        if (!isEndpoint) {
+          const s = ctx.getSite(nx, ny);
+          if (s && s.owner !== "neutral" && !ctx.areAllies(ctx.game.teams, s.owner, owner)) continue;
+        }
+        prev.set(nk, [x, y]);
+        queue.push([nx, ny]);
+      }
+    }
+    if (!prev.has(goalKey)) return null;
+    const cells = [];
+    let cur = goalKey;
+    while (cur) {
+      const [cx, cy] = cur.split(",").map(Number);
+      cells.unshift({ x: cx, y: cy });
+      const par = prev.get(cur);
+      cur = par ? `${par[0]},${par[1]}` : null;
+    }
+    return cells;
+  }
+  function routeIncomeForPath(pathCells) {
+    if (!pathCells || pathCells.length < 2) return 0;
+    const L = pathCells.length;
+    return Math.min(TRADE_ROUTE.incomeCap, TRADE_ROUTE.baseIncome + Math.floor((L - 2) / 2));
+  }
+  function hasNavyGuard(ctx, owner, path) {
+    const waterCells = path.filter((c) => isWater(ctx, c.x, c.y));
+    if (!waterCells.length) return true;
+    const navies = ctx.game.units.filter((u) => u.owner === owner && ctx.typeMeta(u.type) && ctx.typeMeta(u.type).domain === "sea");
+    if (!navies.length) return false;
+    return waterCells.some((c) => navies.some((n) => ctx.diagonalDist(n, c) <= TRADE_ROUTE.navyGuardRange));
+  }
+  function collectNodes(ctx, owner) {
+    const nodes = [];
+    for (const s of ctx.game.sites) {
+      if (s.owner !== owner || !NODE_SITE_KINDS.has(s.kind)) continue;
+      nodes.push({ kind: "site", id: s.id, x: s.x, y: s.y, label: s.name || `${s.kind}(${s.x},${s.y})` });
+    }
+    for (const u of ctx.game.units) {
+      if (u.owner !== owner || !isCaravanType(u.type)) continue;
+      nodes.push({ kind: "unit", id: u.id, x: u.x, y: u.y, label: `${typeLabel(ctx, u.type)}（商队）` });
+    }
+    if (ctx.ownerNation(owner) === "ragusa") {
+      for (const f of ctx.getFacilitiesByType(TRADING_PORT.type)) {
+        if (f.owner !== owner) continue;
+        nodes.push({ kind: "facility", id: f.id, x: f.x, y: f.y, label: "交易港" });
+      }
+    }
+    return nodes;
+  }
+  function existingRoutePairs(ctx, owner) {
+    const pairs = /* @__PURE__ */ new Set();
+    for (const f of ctx.getFacilitiesByType(TRADE_ROUTE.type)) {
+      if (f.owner !== owner) continue;
+      const d = f.data || {};
+      if (d.startNode && d.endNode) {
+        pairs.add([d.startNode.kind, d.startNode.id, d.endNode.kind, d.endNode.id].join(":"));
+      }
+    }
+    return pairs;
+  }
+  function routesOf(ctx, owner) {
+    return ctx.getFacilitiesByType(TRADE_ROUTE.type).filter((f) => f.owner === owner);
+  }
+  function routeCandidates(ctx, owner) {
+    const nodes = collectNodes(ctx, owner);
+    if (nodes.length < 2) return [];
+    const used = existingRoutePairs(ctx, owner);
+    const cands = [];
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const key = [a.kind, a.id, b.kind, b.id].join(":");
+        if (used.has(key)) continue;
+        const path = findPath(ctx, owner, a, b);
+        if (!path) continue;
+        const sea = path.some((c) => isWater(ctx, c.x, c.y));
+        if (sea && !hasNavyGuard(ctx, owner, path)) continue;
+        cands.push({ a, b, path, income: routeIncomeForPath(path), sea });
+      }
+    }
+    cands.sort((p, q) => p.path.length - q.path.length || q.income - p.income);
+    return cands.slice(0, TRADE_ROUTE.maxCandidates);
+  }
+  function resolveNodeRef(ctx, node) {
+    if (!node) return null;
+    if (node.kind === "site") {
+      const s = ctx.game.sites.find((e) => e.id === node.id);
+      return s ? { kind: "site", id: s.id, x: s.x, y: s.y, label: node.label } : null;
+    }
+    if (node.kind === "unit") {
+      const u = ctx.game.units.find((e) => e.id === node.id);
+      return u ? { kind: "unit", id: u.id, x: u.x, y: u.y, label: node.label } : null;
+    }
+    if (node.kind === "facility") {
+      const f = ctx.getAllFacilities().find((e) => e.id === node.id);
+      return f ? { kind: "facility", id: f.id, x: f.x, y: f.y, label: node.label } : null;
+    }
+    return null;
+  }
+  function establishRoute(ctx, owner, a, b) {
+    if (routesOf(ctx, owner).length >= TRADE_ROUTE.maxRoutes) {
+      ctx.log("贸易路线上限已到，无法再建立。", "warning");
+      return false;
+    }
+    const ra = resolveNodeRef(ctx, a);
+    const rb = resolveNodeRef(ctx, b);
+    if (!ra || !rb) {
+      ctx.log("节点已失效，贸易路线建立失败。", "warning");
+      return false;
+    }
+    const path = findPath(ctx, owner, ra, rb);
+    if (!path) {
+      ctx.log("两端节点已不可达，贸易路线建立失败。", "warning");
+      return false;
+    }
+    const sea = path.some((c) => isWater(ctx, c.x, c.y));
+    if (sea && !hasNavyGuard(ctx, owner, path)) {
+      ctx.log("海路缺少己方海军保护，贸易路线建立失败。", "warning");
+      return false;
+    }
+    const income = routeIncomeForPath(path);
+    const fac = ctx.createFacility(TRADE_ROUTE.type, owner, ra.x, ra.y, {
+      hp: 1,
+      duration: null,
+      // 贸易路线不过期，直到端点失效/被切断
+      data: {
+        startNode: { kind: ra.kind, id: ra.id, x: ra.x, y: ra.y },
+        endNode: { kind: rb.kind, id: rb.id, x: rb.x, y: rb.y },
+        path,
+        income,
+        status: "active",
+        establishedTurn: ctx.game.turn,
+        sea,
+        seaCells: path.filter((c) => isWater(ctx, c.x, c.y)).length
+      }
+    });
+    ctx.log(`${routeLabel(fac)}建立成功，每回合 +${income} 金币${sea ? "（海路，需海军保护）" : ""}。`, "system");
+    return !!fac;
+  }
+  function nodeAlive(ctx, owner, node) {
+    if (!node) return false;
+    if (node.kind === "site") {
+      const s = ctx.game.sites.find((e) => e.id === node.id);
+      return !!s && s.owner === owner && NODE_SITE_KINDS.has(s.kind);
+    }
+    if (node.kind === "unit") {
+      const u = ctx.game.units.find((e) => e.id === node.id);
+      return !!u && u.owner === owner && isCaravanType(u.type);
+    }
+    if (node.kind === "facility") {
+      const f = ctx.getAllFacilities().find((e) => e.id === node.id);
+      return !!f && f.owner === owner && f.type === TRADING_PORT.type;
+    }
+    return false;
+  }
+  function refreshRoute(ctx, route) {
+    const d = route.data || {};
+    const owner = route.owner;
+    if (!nodeAlive(ctx, owner, d.startNode) || !nodeAlive(ctx, owner, d.endNode)) {
+      if (d.status !== "removed") {
+        ctx.log(`${routeLabel(route)}端点失效，贸易路线被移除。`, "warning");
+        d.status = "removed";
+      }
+      return "removed";
+    }
+    let newStatus = "active";
+    for (const c of d.path || []) {
+      const s = ctx.getSite(c.x, c.y);
+      if (s && s.owner !== "neutral" && !ctx.areAllies(ctx.game.teams, s.owner, owner)) {
+        newStatus = "disrupted";
+        break;
+      }
+      const u = ctx.getUnit(c.x, c.y);
+      if (u && !ctx.areAllies(ctx.game.teams, u.owner, owner)) {
+        newStatus = "disrupted";
+        break;
+      }
+    }
+    if (newStatus !== d.status) {
+      if (newStatus === "disrupted") {
+        ctx.log(`${routeLabel(route)}被敌军切断，贸易收入暂停（商队可另建新路线）。`, "warning");
+      } else {
+        ctx.log(`${routeLabel(route)}恢复通商。`, "system");
+      }
+      d.status = newStatus;
+    }
+    return newStatus;
+  }
+  function onBeforeMove3(ctx, payload) {
+    const { unit, to } = payload || {};
+    if (!unit || !to) return;
+    for (const route of ctx.getFacilitiesByType(TRADE_ROUTE.type)) {
+      if (ctx.areAllies(ctx.game.teams, unit.owner, route.owner)) continue;
+      const d = route.data || {};
+      if (d.status === "disrupted") continue;
+      if ((d.path || []).some((c) => c.x === to.x && c.y === to.y)) {
+        d.status = "disrupted";
+        ctx.log(`${typeLabel(ctx, unit.type)}进入${routeLabel(route)}，贸易路线被切断！`, "warning");
+      }
+    }
+  }
+  function onSiteCaptured(ctx, payload) {
+    const { unit, site } = payload || {};
+    if (!unit || !site) return;
+    for (const route of ctx.getFacilitiesByType(TRADE_ROUTE.type)) {
+      if (ctx.areAllies(ctx.game.teams, unit.owner, route.owner)) continue;
+      const d = route.data || {};
+      if (d.status === "disrupted") continue;
+      if ((d.path || []).some((c) => c.x === site.x && c.y === site.y)) {
+        d.status = "disrupted";
+        ctx.log(`${routeLabel(route)}沿线据点失守，贸易路线被切断！`, "warning");
+      }
+    }
+  }
+  function onIncomeCalculated(ctx, payload) {
+    if (!payload || !payload.owner) return;
+    const owner = payload.owner;
+    if (!isVeniceOwner(ctx, owner)) return;
+    syncGameRef4(ctx);
+    const nation = ctx.ownerNation(owner);
+    let bonus = 0;
+    const ports = ownerShipyards(ctx, owner).length;
+    let seaBonus = 0;
+    let landBonus = 0;
+    if (nation === "veniceCore") {
+      if (ports >= 2) seaBonus = 1;
+      if (ports >= 3) {
+        seaBonus = 2;
+        landBonus = 1;
+      }
+    }
+    for (const route of ctx.getFacilitiesByType(TRADE_ROUTE.type)) {
+      if (route.owner !== owner) continue;
+      const st = refreshRoute(ctx, route);
+      if (st === "removed") {
+        ctx.removeFacility(route.id);
+        continue;
+      }
+      if (st !== "active") continue;
+      const d = route.data || {};
+      let inc = d.income || 0;
+      if (d.sea) inc += seaBonus;
+      else inc += landBonus;
+      bonus += inc;
+    }
+    for (const port of ctx.getFacilitiesByType(TRADING_PORT.type)) {
+      if (port.owner !== owner) continue;
+      const site = ctx.getSite(port.x, port.y);
+      const stale = !site || site.kind !== "shipyard" || ctx.areAllies(ctx.game.teams, site.owner, owner);
+      const occupied = !!ctx.getUnit(port.x, port.y) && !ctx.areAllies(ctx.game.teams, ctx.getUnit(port.x, port.y).owner, owner);
+      if (stale || occupied) {
+        ctx.removeFacility(port.id);
+        ctx.log("中立商港失效：港口被己方收复或敌军重占，交易港关闭。", "warning");
+        continue;
+      }
+      bonus += TRADING_PORT.income;
+    }
+    if (nation === "genoa") {
+      const rec = state4.loans.get(owner);
+      if (rec && rec.active) {
+        payload.amount -= GENOA_LOAN.repayment;
+        rec.repayLeft -= 1;
+        if (rec.repayLeft <= 0) {
+          rec.active = false;
+          rec.cooldownLeft = GENOA_LOAN.cooldown;
+          ctx.log("热那亚贷款已还清，进入信用冷却。", "gold");
+        }
+      } else if (rec && rec.cooldownLeft > 0) {
+        rec.cooldownLeft -= 1;
+      }
+    }
+    if (bonus > 0) {
+      payload.amount += bonus;
+    }
+  }
+  function onTurnStart4(ctx, payload) {
+    const owner = payload && payload.owner;
+    const initial = !!(payload && payload.initial);
+    syncGameRef4(ctx);
+    if (!isVeniceOwner(ctx, owner)) return;
+    if (!initial && ctx.ownerNation(owner) === "veniceCore") {
+      maybePortProduction(ctx, owner);
+    }
+    if (owner === "player") {
+      requestRouteDecision(ctx, owner);
+      requestLoanDecision(ctx, owner);
+      requestMercenaryDecision(ctx, owner);
+      requestTradingPortDecision(ctx, owner);
+    }
+  }
+  function maybePortProduction(ctx, owner) {
+    const shipyards = ownerShipyards(ctx, owner);
+    if (shipyards.length < 2) return;
+    const site = shipyards.find((s) => !ctx.getUnit(s.x, s.y));
+    if (!site) return;
+    const cost = Math.round((ctx.typeMeta("galley").cost || 30) * 0.5);
+    if ((ctx.game.goldByOwner[owner] || 0) < cost) return;
+    if (!ctx.spendGold(owner, cost)) return;
+    const u = ctx.createUnit("galley", owner, site.x, site.y);
+    ctx.events.emit("productionCompleted", { owner, unit: u, site, kind: "unit" });
+    ctx.log(`海上垄断：${site.name || "港口"}（${site.x},${site.y}）以半价 ${cost} 金币加速生产了桨帆船。`, "gold");
+    return u;
+  }
+  function requestRouteDecision(ctx, owner) {
+    if (!isVeniceOwner(ctx, owner)) return null;
+    if (routesOf(ctx, owner).length >= TRADE_ROUTE.maxRoutes) return null;
+    const cands = routeCandidates(ctx, owner);
+    if (!cands.length) return null;
+    const options = [{ id: "none", label: "不建", description: "保留金币，不建立贸易路线。" }];
+    cands.forEach((c, idx) => {
+      const risk = c.path.filter((p) => {
+        const u = ctx.getUnit(p.x, p.y);
+        return u && !ctx.areAllies(ctx.game.teams, u.owner, owner);
+      }).length;
+      options.push({
+        id: `route:${idx}`,
+        label: `${c.a.label} ↔ ${c.b.label}`,
+        description: `路径 ${c.path.length} 格${c.sea ? "（海路）" : ""}，每回合 +${c.income} 金币${risk ? `；路径上有 ${risk} 个敌军单位，存在被切断风险` : ""}`
+      });
+    });
+    return ctx.requestDecision(`venRoute_${owner}`, {
+      owner,
+      title: "贸易路线",
+      description: "选择两座己方节点建立贸易路线（无直接成本，但可被敌军切断；海路需己方海军保护）。",
+      options,
+      onResolve: (choiceId) => resolveRouteChoice(ctx, owner, cands, choiceId)
+    });
+  }
+  function resolveRouteChoice(ctx, owner, cands, choiceId) {
+    if (!choiceId || choiceId === "none") return false;
+    const idx = parseInt(String(choiceId).slice("route:".length), 10);
+    const cand = cands[idx];
+    if (!cand) return false;
+    return establishRoute(ctx, owner, cand.a, cand.b);
+  }
+  function canLoan(ctx, owner) {
+    if (ctx.ownerNation(owner) !== "genoa") return false;
+    const rec = state4.loans.get(owner);
+    if (!rec) return true;
+    return !rec.active && rec.cooldownLeft <= 0 && rec.totalTaken < GENOA_LOAN.maxLoans;
+  }
+  function requestLoanDecision(ctx, owner) {
+    if (!canLoan(ctx, owner)) return null;
+    const options = [
+      { id: "none", label: "不贷", description: "维持现状，不借贷。" },
+      { id: "loan", label: "贷款 15 金币", description: `立即 +${GENOA_LOAN.amount}，随后 ${GENOA_LOAN.repayTurns} 回合每回合 -${GENOA_LOAN.repayment}（净利息 ${GENOA_LOAN.repayment * GENOA_LOAN.repayTurns - GENOA_LOAN.amount}），还清后冷却 ${GENOA_LOAN.cooldown} 回合。` }
+    ];
+    return ctx.requestDecision(`venLoan_${owner}`, {
+      owner,
+      title: "热那亚银行信用",
+      description: "花未来收入换当前现金——这是借贷/投资决策，请判断是否值得承担还款压力。",
+      options,
+      onResolve: (choiceId) => resolveLoanChoice(ctx, owner, choiceId)
+    });
+  }
+  function resolveLoanChoice(ctx, owner, choiceId) {
+    if (!choiceId || choiceId !== "loan") return false;
+    if (!canLoan(ctx, owner)) return false;
+    const rec = state4.loans.get(owner) || { active: false, repayLeft: 0, cooldownLeft: 0, totalTaken: 0 };
+    ctx.addGold(owner, GENOA_LOAN.amount, "genoaLoan");
+    rec.active = true;
+    rec.repayLeft = GENOA_LOAN.repayTurns;
+    rec.cooldownLeft = 0;
+    rec.totalTaken += 1;
+    state4.loans.set(owner, rec);
+    ctx.log(`热那亚银行放贷：立即获得 ${GENOA_LOAN.amount} 金币，接下来 ${GENOA_LOAN.repayTurns} 回合每回合还款 ${GENOA_LOAN.repayment}。`, "gold");
+    return true;
+  }
+  function requestMercenaryDecision(ctx, owner) {
+    if (!isVeniceOwner(ctx, owner)) return null;
+    if (state4.mercs.get(owner) && state4.mercs.get(owner).lastBuyTurn === ctx.game.turn) return null;
+    const market = marketSite(ctx, owner);
+    if (!market) return null;
+    const options = [{ id: "none", label: "不购买", description: "保留金币，本回合不雇佣。" }];
+    for (const o of MERCENARY.options) {
+      const cost = Math.round(o.baseCost * MERCENARY.markup);
+      options.push({ id: `merc:${o.id}`, label: `雇佣${o.label}（${cost}金币）`, description: o.desc });
+    }
+    return ctx.requestDecision(`venMerc_${owner}`, {
+      owner,
+      title: "雇佣兵市场",
+      description: `按当前战场购买"临时解决方案"（部署于 ${market.name || "市场"}${market.x},${market.y}）。`,
+      options,
+      onResolve: (choiceId) => resolveMercChoice(ctx, owner, choiceId)
+    });
+  }
+  function marketSite(ctx, owner) {
+    return ctx.game.sites.find((s) => s.owner === owner && (s.kind === "city" || s.kind === "shipyard") && !ctx.getUnit(s.x, s.y));
+  }
+  function resolveMercChoice(ctx, owner, choiceId) {
+    if (!choiceId || choiceId === "none") return false;
+    if (!choiceId.startsWith("merc:")) return false;
+    const type = choiceId.slice("merc:".length);
+    const def = MERCENARY.options.find((o) => o.id === type);
+    if (!def) return false;
+    const market = marketSite(ctx, owner);
+    if (!market) {
+      ctx.log("市场格已被占用，雇佣兵无法部署。", "warning");
+      return false;
+    }
+    const cost = Math.round(def.baseCost * MERCENARY.markup);
+    if ((ctx.game.goldByOwner[owner] || 0) < cost) {
+      ctx.log("金币不足，无法雇佣。", "warning");
+      return false;
+    }
+    if (!ctx.spendGold(owner, cost)) return false;
+    const u = ctx.createUnit(type, owner, market.x, market.y);
+    state4.mercs.set(owner, { lastBuyTurn: ctx.game.turn });
+    ctx.log(`雇佣兵市场：${typeLabel(ctx, type)}抵达（${market.x},${market.y}），花费 ${cost} 金币。`, "system");
+    return !!u;
+  }
+  function eligiblePorts(ctx, owner) {
+    if (ctx.ownerNation(owner) !== "ragusa") return [];
+    const count = ctx.getFacilitiesByType(TRADING_PORT.type).filter((f) => f.owner === owner).length;
+    if (count >= TRADING_PORT.maxPorts) return [];
+    const out = [];
+    for (const site of ctx.game.sites) {
+      if (site.kind !== "shipyard") continue;
+      if (site.owner === "neutral" || ctx.areAllies(ctx.game.teams, site.owner, owner)) continue;
+      if (ctx.getFacilitiesByType(TRADING_PORT.type).some((f) => f.x === site.x && f.y === site.y)) continue;
+      const caravan = ctx.game.units.find((u) => u.owner === owner && isCaravanType(u.type) && ctx.diagonalDist(u, site) <= TRADING_PORT.caravanRange);
+      if (!caravan) continue;
+      out.push(site);
+    }
+    return out;
+  }
+  function requestTradingPortDecision(ctx, owner) {
+    const ports = eligiblePorts(ctx, owner);
+    if (!ports.length) return null;
+    const options = [{ id: "none", label: "不转化", description: "保留现状，不设立中立商港。" }];
+    ports.slice(0, 3).forEach((site, idx) => {
+      options.push({
+        id: `port:${idx}`,
+        label: `转化${site.name || "港口"}（${site.x},${site.y}）`,
+        description: `中立商港：不完全占领，每回合 +${TRADING_PORT.income} 金币，并为拉古萨贸易网络提供连接。`
+      });
+    });
+    return ctx.requestDecision(`venPort_${owner}`, {
+      owner,
+      title: "拉古萨中立商港",
+      description: "拉古萨商队已抵达敌方港口，可将其变为交易港（不占领，可被敌军摧毁/重占）。",
+      options,
+      onResolve: (choiceId) => resolvePortChoice(ctx, owner, ports, choiceId)
+    });
+  }
+  function resolvePortChoice(ctx, owner, ports, choiceId) {
+    if (!choiceId || choiceId === "none") return false;
+    const idx = parseInt(String(choiceId).slice("port:".length), 10);
+    const site = ports[idx];
+    if (!site) return false;
+    const count = ctx.getFacilitiesByType(TRADING_PORT.type).filter((f) => f.owner === owner).length;
+    if (count >= TRADING_PORT.maxPorts) return false;
+    const caravan = ctx.game.units.find((u) => u.owner === owner && isCaravanType(u.type) && ctx.diagonalDist(u, site) <= TRADING_PORT.caravanRange);
+    if (!caravan) {
+      ctx.log("商队已离开，商港转化条件不再满足。", "warning");
+      return false;
+    }
+    const fac = ctx.createFacility(TRADING_PORT.type, owner, site.x, site.y, {
+      hp: TRADING_PORT.hp,
+      duration: null,
+      data: { siteId: site.id, establishedTurn: ctx.game.turn }
+    });
+    ctx.log(`中立商港建立：${site.name || "港口"}（${site.x},${site.y}）成为拉古萨交易港，每回合 +${TRADING_PORT.income} 金币。`, "system");
+    return !!fac;
+  }
+  function onAfterAttack3(ctx, payload) {
+    const { attacker, defender, result } = payload || {};
+    if (!attacker || !defender || !result) return;
+    const port = ctx.getFacilitiesByType(TRADING_PORT.type).find((f) => f.x === defender.x && f.y === defender.y);
+    if (!port) return;
+    if (ctx.areAllies(ctx.game.teams, attacker.owner, port.owner)) return;
+    const chip = Math.max(1, Math.round((result.damage || 0) * TRADING_PORT.chipRatio));
+    const remaining = ctx.damageFacility(port.id, chip);
+    if (remaining <= 0) {
+      ctx.log("中立商港在战火中被摧毁。", "warning");
+    } else {
+      ctx.log(`中立商港受到攻击受损（耐久 ${remaining}/${port.maxHp}）。`, "warning");
+    }
+  }
+
+  // src/factions/venice/veniceRules.js
+  var veniceSystem = {
+    id: "venice",
+    // 注册时调用一次：挂载 debug/test 入口（globalThis.__veniceDebug，浏览器控制台可用）
+    init(ctx) {
+      attachDebug3(ctx);
+    },
+    // turnStart：被动维护（海上垄断加速生产）+ 玩家决策请求（路线/借贷/雇佣兵/商港）
+    onTurnStart(ctx, payload) {
+      onTurnStart4(ctx, payload);
+    },
+    // beforeMove：敌军单位进入路线路径 → 立即标记切断（收入侧 incomeCalculated 复核）
+    onBeforeMove(ctx, payload) {
+      onBeforeMove3(ctx, payload);
+    },
+    // afterAttack：敌军攻击交易港格上单位 → 交易港按伤害比例掉耐久
+    onAfterAttack(ctx, payload) {
+      onAfterAttack3(ctx, payload);
+    },
+    // siteCaptured：敌军占领路线沿线据点 → 立即标记切断
+    onSiteCaptured(ctx, payload) {
+      onSiteCaptured(ctx, payload);
+    },
+    // incomeCalculated：贸易路线收益 + 海上垄断 + 交易港收入 + 热那亚还款
+    onIncomeCalculated(ctx, payload) {
+      onIncomeCalculated(ctx, payload);
+    },
+    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
+    reset() {
+      resetForTests4();
+    }
+  };
+  function attachDebug3(ctx) {
+    const debug = {
+      config: () => ({
+        tradeRoute: { ...TRADE_ROUTE },
+        tradingPort: { ...TRADING_PORT },
+        genoaLoan: { ...GENOA_LOAN },
+        mercenary: { ...MERCENARY },
+        nodeSiteKinds: [...NODE_SITE_KINDS],
+        tradeTypes: [...TRADE_TYPES2]
+      }),
+      // 当前所有贸易路线（facility 数据）
+      routes: (owner) => ctx.getFacilitiesByType(TRADE_ROUTE.type).filter((f) => !owner || f.owner === owner).map((f) => ({ id: f.id, owner: f.owner, x: f.x, y: f.y, data: f.data })),
+      // 当前所有中立商港
+      ports: (owner) => ctx.getFacilitiesByType(TRADING_PORT.type).filter((f) => !owner || f.owner === owner).map((f) => ({ id: f.id, owner: f.owner, x: f.x, y: f.y, hp: f.hp, data: f.data })),
+      // 模块级状态（借贷/雇佣兵冷却）
+      state: () => debugState2(),
+      // 查看某 owner 的贸易节点
+      nodes: (owner) => collectNodes(ctx, owner),
+      // 查看某 owner 的候选路线（含收益/海路/风险预览）
+      candidates: (owner) => routeCandidates(ctx, owner).map((c) => ({ a: c.a.label, b: c.b.label, len: c.path.length, income: c.income, sea: c.sea })),
+      // 为某 owner 请求全部威尼斯决策（返回请求数）
+      requestForOwner: (owner) => {
+        let n = 0;
+        if (requestRouteDecision(ctx, owner)) n += 1;
+        if (requestLoanDecision(ctx, owner)) n += 1;
+        if (requestMercenaryDecision(ctx, owner)) n += 1;
+        if (requestTradingPortDecision(ctx, owner)) n += 1;
+        return n;
+      },
+      // 查看未决威尼斯决策（浏览器 UI 阶段前的手动测试入口）
+      pending: (owner) => ctx.getPendingDecisions(owner || "player").filter((r) => String(r.id || "").startsWith("ven")).map((r) => ({ id: r.id, title: r.context.title, options: r.context.options.map((o) => o.id) })),
+      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId)
+    };
+    if (typeof globalThis !== "undefined") globalThis.__veniceDebug = debug;
+    return debug;
+  }
+
   // src/main.js
   (() => {
     "use strict";
@@ -1955,6 +2627,7 @@
       });
       factionRegistry.register("hre", hreSystem, factionCtx);
       factionRegistry.register("goldenHorde", goldenHordeSystem, factionCtx);
+      factionRegistry.register("venice", veniceSystem, factionCtx);
       return factionCtx;
     }
     let fastSim = false;
@@ -4128,7 +4801,7 @@
     }
     function bestObjective(owner, unitEntry, intent = null) {
       const defaultAgg = AGG[game.aiProfiles?.[owner]?.agg || "balanced"] || AGG.balanced;
-      const state4 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
+      const state5 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
       const memory = frontMemory(owner);
       const isSea = typeMeta(unitEntry.type).domain === "sea";
       const pool = isSea ? [intent?.navalSite, intent?.assaultSite, intent?.expansionSite, ...intent?.alternateSites || []] : [intent?.expansionSite, intent?.assaultSite, ...intent?.alternateSites || []];
@@ -4145,7 +4818,7 @@
         if (strategicSiteValue(siteEntry, owner, unitEntry) <= 0) {
           return;
         }
-        if (state4.rerouteTurns > 0 && state4.failedObjectiveKey === `site:${key}`) {
+        if (state5.rerouteTurns > 0 && state5.failedObjectiveKey === `site:${key}`) {
           return;
         }
         if (memory[`site:${key}`]?.cooldown > 0) {
@@ -4278,9 +4951,9 @@
       }
       return distances;
     }
-    function finalizeUnitState(unitEntry, state4, objectiveKey, movedThisTurn) {
-      const stalledTurns = movedThisTurn ? 0 : state4.stalledTurns + 1;
-      const rerouteTurns = movedThisTurn ? Math.max(0, state4.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state4.rerouteTurns - 1);
+    function finalizeUnitState(unitEntry, state5, objectiveKey, movedThisTurn) {
+      const stalledTurns = movedThisTurn ? 0 : state5.stalledTurns + 1;
+      const rerouteTurns = movedThisTurn ? Math.max(0, state5.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state5.rerouteTurns - 1);
       rememberFrontOutcome(unitEntry.owner, objectiveKey, movedThisTurn);
       if (!movedThisTurn && stalledTurns >= 2 && objectiveKey.startsWith("site:")) {
         const siteId = objectiveKey.slice(5);
@@ -4291,7 +4964,7 @@
         lastPosition: { x: unitEntry.x, y: unitEntry.y },
         stalledTurns,
         rerouteTurns,
-        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state4.failedObjectiveKey
+        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state5.failedObjectiveKey
       };
     }
     function targetValue(unitEntry) {
@@ -4374,7 +5047,7 @@
     function chooseAction(owner, unitEntry, profile, intent = null) {
       const diffCfg = DIFF[profile.diff];
       const aggCfg = AGG[profile.agg];
-      const state4 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
+      const state5 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
       const cells = [...reachable(game, unitEntry).entries()].map(([key, cost]) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y, cost };
@@ -4393,13 +5066,13 @@
         const moveScore = objective ? (currentPath - nextPath) * 2.9 * diffCfg.lookahead * aggCfg.push : 0;
         const supportScore = friendSupport(owner, cell.x, cell.y);
         const riskPenalty = enemyThreat(owner, cell.x, cell.y) * diffCfg.risk * aggCfg.preserve * 0.9;
-        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state4.stalledTurns * 0.7);
+        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state5.stalledTurns * 0.7);
         const siteEntry = getSite2(cell.x, cell.y);
         const captureScore = siteEntry ? strategicSiteValue(siteEntry, owner, unitEntry) + cityEconomyValue(siteEntry, owner) : 0;
         const intentBonus = intent?.assaultSite ? Math.max(0, dist(unitEntry, intent.assaultSite) - dist(cell, intent.assaultSite)) * 1.4 * assaultMag : 0;
         const expansionBonus = intent?.expansionSite ? Math.max(0, dist(unitEntry, intent.expansionSite) - dist(cell, intent.expansionSite)) * 1.9 * aggCfg.expansion * expansionMag : 0;
         const futureCityPressure = objective ? Math.max(0, futureReach(unitEntry, diffCfg.lookahead) - dist(cell, objective)) * 0.35 : 0;
-        const rerouteBonus = state4.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
+        const rerouteBonus = state5.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
         const terrainBonus = game.terrain[cell.y][cell.x] === "forest" ? 3 * aggCfg.forestBias : 0;
         const roleBonus = unitRoleCellBonus(owner, unitEntry, cell, intent);
         const base = moveScore + supportScore + captureScore + intentBonus + expansionBonus + futureCityPressure + rerouteBonus + terrainBonus + roleBonus - riskPenalty - congestionPenalty;
@@ -4827,18 +5500,18 @@
         if (!game.units.includes(unitEntry)) {
           continue;
         }
-        const state4 = computeUnitState(unitEntry);
+        const state5 = computeUnitState(unitEntry);
         const startCell = { x: unitEntry.x, y: unitEntry.y };
         const assaultKey = intent.assaultSite ? `site:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}` : null;
         const bridgeheadCooldown = assaultKey ? memory[assaultKey]?.cooldown > 0 : false;
-        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state4.rerouteTurns > 0 && state4.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
+        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state5.rerouteTurns > 0 && state5.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
         if (bridgeheadBlocked && typeMeta(unitEntry.type).domain === "land" && profile.agg !== "reckless") {
           const retreatCell = bestRetreatCell(owner, unitEntry, intent.assaultSite);
           if (retreatCell && (retreatCell.x !== unitEntry.x || retreatCell.y !== unitEntry.y)) {
             incrementStrat(owner, "retreats");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}从桥头暂退，在 ${intent.assaultSite.name} 方向重整。`);
             moveUnit(unitEntry, retreatCell.x, retreatCell.y);
-            finalizeUnitState(unitEntry, state4, assaultKey || "idle", true);
+            finalizeUnitState(unitEntry, state5, assaultKey || "idle", true);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4850,7 +5523,7 @@
           if (currentFrontline >= 4 && isReserveCandidate && unitEntry.hp > unitEntry.maxHp * 0.65) {
             incrementStrat(owner, "reserves");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}作为桥头预备队待机。`);
-            finalizeUnitState(unitEntry, state4, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
+            finalizeUnitState(unitEntry, state5, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4858,13 +5531,13 @@
         }
         if (isTransportUnit(unitEntry)) {
           if (!unitEntry.cargo.length && autoLoadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state4, "transport-load", false);
+            finalizeUnitState(unitEntry, state5, "transport-load", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (unitEntry.cargo.length && autoUnloadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state4, "transport-unload", false);
+            finalizeUnitState(unitEntry, state5, "transport-unload", false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4877,7 +5550,7 @@
             if (unitEntry.cargo.length && (nearThreat === 0 || escortAdjacent)) {
               autoUnloadAdjacent(unitEntry);
             }
-            finalizeUnitState(unitEntry, state4, `landing:${cellKey(landing.x, landing.y)}`, moved);
+            finalizeUnitState(unitEntry, state5, `landing:${cellKey(landing.x, landing.y)}`, moved);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4886,13 +5559,13 @@
         if (unitEntry.type === "engineer") {
           const engineerChoice = engineerBuildChoice(owner, unitEntry, intent);
           if (engineerChoice?.kind === "camp" && buildCamp(unitEntry)) {
-            finalizeUnitState(unitEntry, state4, "camp", false);
+            finalizeUnitState(unitEntry, state5, "camp", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (engineerChoice?.cell && engineerLaunch(unitEntry, engineerChoice.kind, engineerChoice.cell, engineerChoice.cargoTypes || [])) {
-            finalizeUnitState(unitEntry, state4, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
+            finalizeUnitState(unitEntry, state5, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4907,7 +5580,7 @@
         if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(game, unitEntry, choice.target)) {
           attack(unitEntry, choice.target);
         }
-        finalizeUnitState(unitEntry, state4, objectiveKey, !sameCell(startCell, unitEntry));
+        finalizeUnitState(unitEntry, state5, objectiveKey, !sameCell(startCell, unitEntry));
         refresh();
         await pause(aiStepDelay());
       }
