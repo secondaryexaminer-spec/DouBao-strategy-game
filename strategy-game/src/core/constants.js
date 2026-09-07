@@ -2,7 +2,16 @@
 // Pure game data & tuning constants. No mutable runtime state lives here.
 // Bundled back into a single IIFE by esbuild; imported by src/main.js.
 
-export const TEAMS = ['A', 'B', 'C', 'D', 'E'];
+export const TEAMS = ['A', 'B', 'C', 'D', 'E', 'F'];
+// 队伍显示名：历史上真实存在过的势力集团（组别=同盟分组，独立于联盟/国家）
+export const TEAM_NAMES = {
+  A: '汉萨同盟',
+  B: '拜占庭帝国',
+  C: '条顿骑士团国',
+  D: '莫斯科大公国',
+  E: '奥斯曼帝国',
+  F: '帖木儿帝国',
+};
 export const OWNER_NAMES = ['赤岩军团', '紫晶军团', '琥珀军团', '翡翠军团', '钢青军团', '沙金军团', '苍鹰军团'];
 export const OWNER_COLORS = ['#ef5c55', '#dc8cff', '#f2a65a', '#56d364', '#7aa2c9', '#d8c06b', '#5ad2c0'];
 export const COLOR_PRESETS = {

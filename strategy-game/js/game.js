@@ -1,6 +1,14 @@
 (() => {
   // src/core/constants.js
-  var TEAMS = ["A", "B", "C", "D", "E"];
+  var TEAMS = ["A", "B", "C", "D", "E", "F"];
+  var TEAM_NAMES = {
+    A: "汉萨同盟",
+    B: "拜占庭帝国",
+    C: "条顿骑士团国",
+    D: "莫斯科大公国",
+    E: "奥斯曼帝国",
+    F: "帖木儿帝国"
+  };
   var OWNER_NAMES = ["赤岩军团", "紫晶军团", "琥珀军团", "翡翠军团", "钢青军团", "沙金军团", "苍鹰军团"];
   var OWNER_COLORS = ["#ef5c55", "#dc8cff", "#f2a65a", "#56d364", "#7aa2c9", "#d8c06b", "#5ad2c0"];
   var COLOR_PRESETS = {
@@ -3795,7 +3803,15 @@
       }
       const agg = { rounds: runs.length, seed, wins: {}, avgTurns: 0, totals: {} };
       for (const run of runs) {
-        const winnerTeam = run.result?.text?.match(/^(\S+)\s*组/)?.[1] || Object.entries(run.cityOwners).filter(([t]) => t !== "neutral").sort((a, b) => b[1] - a[1])[0]?.[0] || "未定";
+        const winnerTeam = (() => {
+          const m = run.result?.text?.match(/^(.*?)\s*组/);
+          if (!m) {
+            const fallback = Object.entries(run.cityOwners).filter(([t]) => t !== "neutral").sort((a, b) => b[1] - a[1])[0]?.[0];
+            return fallback || "未定";
+          }
+          const label = m[1];
+          return Object.keys(TEAM_NAMES).find((k) => TEAM_NAMES[k] === label) || label;
+        })();
         agg.wins[winnerTeam] = (agg.wins[winnerTeam] || 0) + 1;
         agg.avgTurns += run.turn;
         for (const key of Object.keys(run.totals)) {
@@ -4022,6 +4038,9 @@
     function teamOf2(owner) {
       return teamOf(game?.teams, owner);
     }
+    function teamName(t) {
+      return TEAM_NAMES[t] || `${t}组`;
+    }
     function areAllies2(a, b) {
       return areAllies(game?.teams, a, b);
     }
@@ -4030,12 +4049,12 @@
     }
     function ownerName(owner) {
       if (owner === "player") {
-        return `蓝方·${teamOf2(owner)}组`;
+        return `蓝方·${teamName(teamOf2(owner))}`;
       }
       if (owner === "neutral") {
         return "中立势力";
       }
-      return `${OWNER_NAMES[Number(owner.slice(2))] || "敌军"}·${teamOf2(owner)}组`;
+      return `${OWNER_NAMES[Number(owner.slice(2))] || "敌军"}·${teamName(teamOf2(owner))}`;
     }
     function ownerShort(owner) {
       if (owner === "player") {
@@ -4729,7 +4748,7 @@
       }
       const [leadTeam, lead] = ranked[0];
       const playerWin = !game.settings?.spectator && teamOf2("player") === leadTeam;
-      finish(playerWin, `战局在第 ${game.turn} 回合达到回合上限，判定 ${leadTeam} 组以 ${lead.cities} 城 / ${lead.sites} 据点领先胜出。`);
+      finish(playerWin, `战局在第 ${game.turn} 回合达到回合上限，判定 ${teamName(leadTeam)} 以 ${lead.cities} 城 / ${lead.sites} 据点领先胜出。`);
     }
     function landUnitCanReachForeignCity(unitEntry) {
       if (typeMeta(unitEntry.type).domain !== "land") {
@@ -4793,14 +4812,14 @@
         if (game.settings.mode === "skirmish") {
           const combatTeams = new Set(game.units.map((unitEntry) => teamOf2(unitEntry.owner)));
           if (combatTeams.size === 1 && combatTeams.size > 0) {
-            finish(true, `${[...combatTeams][0]} 组赢得了观战遭遇战。`);
+            finish(true, `${teamName([...combatTeams][0])} 赢得了观战遭遇战。`);
           }
           return;
         }
         if (game.settings.mode === "survival" && game.turn >= 12) {
           const ranked = [...activeTeams2].sort((a, b) => game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf2(siteEntry.owner) === b).length - game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf2(siteEntry.owner) === a).length);
           if (ranked[0]) {
-            finish(true, `${ranked[0]} 组在观战守城模式中存活到第12回合。`);
+            finish(true, `${teamName(ranked[0])} 在观战守城模式中存活到第12回合。`);
           }
           return;
         }
@@ -4809,12 +4828,12 @@
           const winnerTeam = [...hostileTeams2][0];
           const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== winnerTeam));
           if (!enemyEngineers) {
-            finish(true, `${winnerTeam} 组完成了全部敌对城市与海上据点占领，并清除了敌方工程师。`);
+            finish(true, `${teamName(winnerTeam)} 完成了全部敌对城市与海上据点占领，并清除了敌方工程师。`);
             return;
           }
         }
         if (activeTeams2.size === 1 && activeTeams2.size > 0) {
-          finish(true, `${[...activeTeams2][0]} 组成为战场最后赢家。`);
+          finish(true, `${teamName([...activeTeams2][0])} 成为战场最后赢家。`);
         }
         return;
       }
@@ -4902,9 +4921,9 @@
     }
     function sideLabel() {
       if (game.settings?.spectator) {
-        return `观战中 · ${ownerShort(game.side)}行动中 · ${teamOf2(game.side)}组`;
+        return `观战中 · ${ownerShort(game.side)}行动中 · ${teamName(teamOf2(game.side))}`;
       }
-      return game.side === "player" ? `你的回合 · ${teamOf2("player")}组` : `${ownerShort(game.side)}行动中 · ${teamOf2(game.side)}组`;
+      return game.side === "player" ? `你的回合 · ${teamName(teamOf2("player"))}` : `${ownerShort(game.side)}行动中 · ${teamName(teamOf2(game.side))}`;
     }
     function ownerFaction(owner) {
       if (owner === "player") return game.settings?.faction;
@@ -7062,7 +7081,7 @@
       $("aiRows").innerHTML = Array.from({ length: count }, (_, i) => {
         const colorOptionsMarkup = colorOptions().map(([key, meta]) => `<option value="${key}" ${key === defaults[i % defaults.length] ? "selected" : ""}>${meta.name}</option>`).join("");
         const defaultTeam = TEAMS[(i + 1) % TEAMS.length];
-        const teamOptionsMarkup = TEAMS.map((team) => `<option value="${team}" ${team === defaultTeam ? "selected" : ""}>${team}组</option>`).join("");
+        const teamOptionsMarkup = TEAMS.map((team) => `<option value="${team}" ${team === defaultTeam ? "selected" : ""}>${TEAM_NAMES[team] || team + "组"}</option>`).join("");
         const aiFactionIds = Object.keys(FACTIONS);
         const aiDefaultFaction = aiFactionIds[i % aiFactionIds.length];
         const aiFactionMarkup = aiFactionIds.map((fid) => `<option value="${fid}" ${fid === aiDefaultFaction ? "selected" : ""}>${FACTIONS[fid].name}</option>`).join("");
@@ -7070,7 +7089,7 @@
         <td class="pt-name">🤖 AI ${i + 1}</td>
         <td><select id="ai${i}Diff" title="AI 难度"><option value="easy">简单</option><option value="medium" selected>中等</option><option value="brutal">冷酷</option><option value="bridgehead">桥头(测试)</option><option value="naval">海防(测试)</option></select></td>
         <td><select id="ai${i}Color" title="AI 颜色">${colorOptionsMarkup}</select></td>
-        <td><select id="ai${i}Team" title="AI 组别">${teamOptionsMarkup}</select></td>
+        <td><select id="ai${i}Team" title="AI 队伍">${teamOptionsMarkup}</select></td>
         <td><select id="ai${i}Agg" title="AI 进攻欲"><option value="cautious">谨慎</option><option value="balanced" selected>均衡</option><option value="reckless">冲动</option></select></td>
         <td><select id="ai${i}Faction" class="ai-faction-select" data-ai="${i}" title="AI 联盟">${aiFactionMarkup}</select></td>
         <td><select id="ai${i}Nation" title="AI 国家"></select></td>
@@ -7143,7 +7162,7 @@
       }
       $("spectatorSelect").insertAdjacentHTML("beforeend", `<option value="off" selected>关闭</option><option value="on">开启</option>`);
       for (const team of TEAMS) {
-        $("playerTeamSelect").insertAdjacentHTML("beforeend", `<option value="${team}" ${team === "A" ? "selected" : ""}>${team}组</option>`);
+        $("playerTeamSelect").insertAdjacentHTML("beforeend", `<option value="${team}" ${team === "A" ? "selected" : ""}>${TEAM_NAMES[team] || team + "组"}</option>`);
       }
       for (const [id, meta] of colorOptions()) {
         $("playerColorSelect").insertAdjacentHTML("beforeend", `<option value="${id}" ${id === "azure" ? "selected" : ""}>${meta.name}</option>`);
