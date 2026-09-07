@@ -12,6 +12,7 @@ import { TYPES, TERRAIN } from '../../core/constants.js';
 import * as raid from './raiding.js';
 import * as camp from './nomadCamp.js';
 import { goldenHordeSystem } from './goldenHordeRules.js';
+import * as nations from './nationMechanics.js';
 
 let passed = 0;
 let failed = 0;
@@ -263,7 +264,7 @@ console.log('== G6 营地建造 ==');
   ctx.resolveDecision(dec.id, 'build');
   const f = facAt(3, 3);
   assert(!!f && f.type === camp.NOMAD_CAMP.type, '营地建造成功');
-  eq(f.duration, 5, '营地持续 5 回合');
+  eq(f.duration, 7, '营地持续 7 回合（基础 5 + 金帐本部 +2，阶段3 国家机制）');
   eq(game.goldByOwner.player, 75, '营地扣 25 金币');
   eq(u.acted, true, '建造单位已行动');
   eq(u.move, 0, '建造单位移动归零');
@@ -399,6 +400,72 @@ console.log('== G11 raidPower 兵种联动 ==');
   eq(raid.isTradeTarget(ctx, mkUnit('ragusaCaravan', 'enemy', 1, 1)), true, 'ragusaCaravan 是商队');
   eq(raid.isTradeTarget(ctx, mkUnit('transport', 'enemy', 1, 1)), true, '运兵船是运输单位');
   eq(raid.isTradeTarget(ctx, mkUnit('militia', 'enemy', 1, 1)), false, '民兵不是商队');
+}
+
+// ---------------------------------------------------------------------------
+// N1 国家机制：可汗威望（阶段3）
+// ---------------------------------------------------------------------------
+console.log('== N1 可汗威望 ==');
+{
+  freshGame(); // settings: goldenHorde/goldenHordeCore
+  const khan = mkUnit('khanGuard', 'player', 4, 4);
+  game.units.push(khan);
+  afterAttack(khan, mkUnit('militia', 'enemy', 1, 1), 10, true);
+  eq(nations.getPrestige(ctx, 'player'), 1, '击杀 +1 威望');
+  // 威望 5：骑兵每回合首次攻击 +1
+  nations.setPrestigeForTests(ctx, 'player', 5);
+  const cav = mkUnit('hordeCavalry', 'player', 3, 3);
+  const foe = mkUnit('militia', 'enemy', 3, 4);
+  game.units.push(cav, foe);
+  eq(beforeAttack(cav, foe, 6).result.damage, 7, '威望5：骑兵首攻 +1（6→7）');
+  eq(beforeAttack(cav, foe, 6).result.damage, 6, '同回合第二次攻击无加成');
+  // 威望 15：可汗亲卫攻击 +2
+  nations.setPrestigeForTests(ctx, 'player', 15);
+  const foe2 = mkUnit('militia', 'enemy', 4, 5);
+  game.units.push(foe2);
+  eq(beforeAttack(khan, foe2, 10).result.damage, 12, '威望15：可汗亲卫 +2（10→12）');
+}
+
+// ---------------------------------------------------------------------------
+// N2 国家机制：蓝帐伏击阵地（阶段3）
+// ---------------------------------------------------------------------------
+console.log('== N2 蓝帐伏击 ==');
+{
+  freshGame({ settings: { faction: 'goldenHorde', nation: 'blueHorde' } });
+  game.terrain[4][4] = 'snow';
+  const archer = mkUnit('nomadArcher', 'player', 4, 4, { maxMove: 4, move: 4 });
+  const foe = mkUnit('militia', 'enemy', 4, 5);
+  game.units.push(archer, foe);
+  eq(beforeAttack(archer, foe, 5).result.damage, 7, '雪地首攻伏击 +2（5→7）');
+  afterAttack(archer, foe, 7, false);
+  eq(archer.move, 4, '伏击后仍可撤离：移动力恢复满值');
+  eq(beforeAttack(archer, foe, 5).result.damage, 5, '同回合第二次攻击无伏击加成');
+  // 新回合重置
+  beginTurn('player', false);
+  eq(beforeAttack(archer, foe, 5).result.damage, 7, '新回合伏击重置（首攻 +2）');
+}
+
+// ---------------------------------------------------------------------------
+// N3 国家机制：白帐绿洲网络（阶段3）
+// ---------------------------------------------------------------------------
+console.log('== N3 绿洲网络 ==');
+{
+  freshGame({ settings: { faction: 'goldenHorde', nation: 'whiteHorde' } });
+  game.terrain[3][3] = 'desert';
+  game.sites.push({ id: 's1', kind: 'city', owner: 'player', x: 3, y: 3, tier: 1, income: 10 });
+  const camel = mkUnit('camelCavalry', 'player', 3, 4);
+  const foe = mkUnit('hordeCavalry', 'enemy', 3, 5);
+  game.units.push(camel, foe);
+  eq(beforeAttack(camel, foe, 8).result.damage, 10, '绿洲网络内对骑兵 +2（8→10）');
+  // 网络外无加成
+  const camel2 = mkUnit('camelCavalry', 'player', 8, 8);
+  const foe2 = mkUnit('hordeCavalry', 'enemy', 8, 9);
+  game.units.push(camel2, foe2);
+  eq(beforeAttack(camel2, foe2, 8).result.damage, 8, '网络外对骑兵无加成');
+  // 网络回血（turnStart 非 initial）
+  camel.hp = camel.maxHp - 4;
+  beginTurn('player', false);
+  eq(camel.hp, camel.maxHp - 2, '绿洲网络回血 +2');
 }
 
 // ---------------------------------------------------------------------------

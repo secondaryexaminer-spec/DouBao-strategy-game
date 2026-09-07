@@ -20,10 +20,10 @@
 //  - 壕沟"减少冲锋"：复刻 combat.js 冲锋触发条件（满移动力/相邻/非反击/非长矛方阵），
 //    defender 站在明方 mingTrench 格上 → 冲锋加成减免（最多 -2，最低 0）——与 HRE 壕沟
 //    的冲锋减免语义一致（工事格属性，不要求 defender 是明方）。
-//  - 炮台/栈桥防御为"范围光环"，只对明方（isMingOwner）单位生效（handoff：范围内己方单位防御加成）。
-//  - 临时桥接口缺口（Handoff §4-4 方案 a）：当前无移动成本 override 钩子，临时桥降级为
-//    "栈桥工事"——桥格及相邻格（≤1）己方单位被攻击伤害 -1，不改移动成本；写进已知问题，
-//    阶段3 主对话若补移动成本钩子再升级。
+//  - 炮台防御为"范围光环"，只对明方（isMingOwner）单位生效（handoff：范围内己方单位防御加成）。
+//  - 临时桥（bridge，阶段3 裁决③升级）：core/movement.js 新增通用设施修正——facility.data
+//    .moveCostMod 为数字时叠加到地形成本（最低 1），core 不识别具体设施类型。临时桥 = 桥格
+//    移动成本 -1（全体生效：桥本身敌我皆可利用），持续 3 回合（"临时"语义，营地先例）。
 //  - 瞭望塔"火力校正"效果实现在 fireZone.js（进入伤害 +1 / crossfire +1）；本文件只负责
 //    瞭望塔的部署与生命周期。视野降级为标记（见已知问题）。
 
@@ -47,9 +47,9 @@ export const ENGINEERING = {
     id: 'mingTrench', label: '壕沟', cost: 16, hp: 12, duration: null,
     desc: '壕沟上的单位免受冲锋加成（最多减免 2 点）',
   },
-  causeway: {
-    id: 'causeway', label: '栈桥工事', cost: 12, hp: 10, duration: null, range: 1, def: 1,
-    desc: '桥格及相邻格己方单位被攻击时伤害 -1（临时桥降级版，不改移动成本）',
+  bridge: {
+    id: 'bridge', label: '临时桥', cost: 12, hp: 10, duration: 3, moveCostMod: -1,
+    desc: '桥格地形移动成本 -1（持续 3 回合，敌我单位均可利用）',
   },
 };
 
@@ -119,7 +119,7 @@ export function deployOptionsFor(ctx, unit) {
   const options = [{ id: 'none', label: '不建', description: '保留金币与本回合行动，不部署设施。' }];
   if (!isEngineerUnit(ctx, unit)) return options;
   const gold = ctx.game.goldByOwner[unit.owner] || 0;
-  for (const key of ['turret', 'watchtower', 'supplyDepot', 'mingTrench', 'causeway']) {
+  for (const key of ['turret', 'watchtower', 'supplyDepot', 'mingTrench', 'bridge']) {
     const d = ENGINEERING[key];
     if (gold >= d.cost) {
       options.push({ id: d.id, label: `部署${d.label}`, description: `${d.desc}（${d.cost}金币，${d.duration == null ? '持久' : d.duration + '回合'}）` });
@@ -165,7 +165,11 @@ export function resolveDeploy(ctx, owner, unitId, choiceId) {
     return false;
   }
   if (!ctx.spendGold(owner, def.cost)) return false;
-  ctx.createFacility(choiceId, owner, unit.x, unit.y, { hp: def.hp, duration: def.duration });
+  ctx.createFacility(choiceId, owner, unit.x, unit.y, {
+    hp: def.hp,
+    duration: def.duration,
+    data: { ...(typeof def.moveCostMod === 'number' ? { moveCostMod: def.moveCostMod } : {}) },
+  });
   // 部署消耗本回合行动（与 HRE 建造一致：移动归零 + 已行动 + 已攻击）
   unit.acted = true;
   unit.move = 0;
@@ -269,17 +273,12 @@ export function onBeforeAttack(ctx, payload) {
     }
   }
 
-  // 2. 范围光环（只对明方单位生效）：炮台范围内己方 +1 / 栈桥工事桥格及相邻己方 +1
+  // 2. 范围光环（只对明方单位生效）：炮台范围内己方 +1
   if (isMingOwner(ctx, defender.owner)) {
     const turrets = ctx.getFacilitiesByType('turret')
       .filter(f => isMingOwner(ctx, f.owner) && inRange(defender, f, ENGINEERING.turret.range));
     if (turrets.length) {
       result.damage = Math.max(1, result.damage - ENGINEERING.turret.def);
-    }
-    const causeways = ctx.getFacilitiesByType('causeway')
-      .filter(f => isMingOwner(ctx, f.owner) && inRange(defender, f, ENGINEERING.causeway.range));
-    if (causeways.length) {
-      result.damage = Math.max(1, result.damage - ENGINEERING.causeway.def);
     }
   }
 }

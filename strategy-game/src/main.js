@@ -749,9 +749,8 @@ import { mingSystem } from './factions/ming/mingRules.js';
   }
 
   function effectiveMove(unitEntry) {
-    const nat = unitEntry.owner === 'player' ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
-    const prussiaBonus = nat === 'prussia' ? 1 : 0;
-    return unitEntry.baseMove + Math.floor(unitEntry.rank / 2) + prussiaBonus;
+    // 阶段3 移除普鲁士恒定移动+1（重构为军阵协同，见 src/factions/hre/nationMechanics.js）
+    return unitEntry.baseMove + Math.floor(unitEntry.rank / 2);
   }
 
   function healMultiplier(unitEntry) {

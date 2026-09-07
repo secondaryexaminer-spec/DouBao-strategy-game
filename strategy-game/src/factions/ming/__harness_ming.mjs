@@ -2,7 +2,7 @@
 // 验证：非大明局零变化 / fireZone 生成（远程/近战/去重/叠加/目标死亡）/ 进入受伤（不致死/同盟豁免/站桩不结算）/
 //       瞭望塔火力校正 / crossfire 判定（2 区触发/1 区不触发/校正）/ expire 时序 /
 //       工程部署决策（player fallback 不建 / UI pending / resolve / AI 不请求）/
-//       炮台（范围伤害不致死/防御光环）/ 补给站回血 / 壕沟冲锋减免 / 栈桥工事防御 /
+//       炮台（范围伤害不致死/防御光环）/ 补给站回血 / 壕沟冲锋减免 / 临时桥移动成本修正 /
 //       设施被攻击摧毁 / 水寨（港口/海岸/非朝鲜不生效）/ 丛林伏击（首攻/森林/新回合）/
 //       锦衣卫 stealth（潜伏/攻击暴露/非本部不生效）/ 跨局状态重置。
 // 运行：node src/factions/ming/__harness_ming.mjs
@@ -343,7 +343,7 @@ console.log('== M6 工程部署决策 ==');
   beginTurn('player', false);
   const pend = pendingMg('player');
   eq(pend.length, 1, 'UI 下有一个待决部署决策');
-  eq(pend[0].options.join(','), 'none,turret,watchtower,supplyDepot,mingTrench,causeway', '选项顺序：不建→炮台→瞭望塔→补给站→壕沟→栈桥');
+  eq(pend[0].options.join(','), 'none,turret,watchtower,supplyDepot,mingTrench,bridge', '选项顺序：不建→炮台→瞭望塔→补给站→壕沟→临时桥');
   ctx.resolveDecision(pend[0].id, 'turret');
   eq(ctx.getFacilitiesByType('turret').length, 1, 'resolve 炮台 → 设施创建');
   eq(game.goldByOwner.player, 100 - 20, '建造花费 20 金币');
@@ -452,20 +452,23 @@ console.log('== M9 壕沟 ==');
 }
 
 // ---------------------------------------------------------------------------
-// M10 栈桥工事：桥格及相邻己方防御 +1
+// M10 临时桥：桥格地形移动成本 -1（阶段3 裁决③，core 通用 moveCostMod 修正）
 // ---------------------------------------------------------------------------
-console.log('== M10 栈桥工事 ==');
+console.log('== M10 临时桥 ==');
 {
   freshGame({ settings: { faction: 'ming', nation: 'mingCore' } });
-  ctx.createFacility('causeway', 'player', 4, 4, { hp: 10, duration: null });
-  const onBridge = mkUnit('qiArmy', 'player', 4, 4);     // 桥格
-  const nearBridge = mkUnit('qiArmy', 'player', 5, 4);   // 相邻
-  const farUnit = mkUnit('qiArmy', 'player', 7, 7);      // 范围外
-  const foe = mkUnit('militia', 'enemy', 3, 4);
-  game.units.push(onBridge, nearBridge, farUnit, foe);
-  eq(beforeAttack(foe, onBridge, 5), 4, '桥格上己方被攻击 -1（5→4）');
-  eq(beforeAttack(foe, nearBridge, 5), 4, '相邻格己方被攻击 -1（5→4）');
-  eq(beforeAttack(foe, farUnit, 5), 5, '范围外不减伤');
+  game.terrain[4][4] = 'forest'; // 高成本地形（cost 2）
+  const walker = mkUnit('qiArmy', 'player', 4, 4);
+  game.units.push(walker);
+  eq(ctx.movementCost(game, walker, 4, 4), 2, '无桥：森林地形移动成本 2');
+  ctx.createFacility('bridge', 'player', 4, 4, { hp: 10, duration: 3, data: { moveCostMod: -1 } });
+  eq(ctx.movementCost(game, walker, 4, 4), 1, '有桥：森林移动成本 -1（2→1）');
+  // 平地（cost 1）不受桥影响（最低 1，成本本就 1）
+  eq(ctx.movementCost(game, walker, 5, 4), 1, '平地移动成本仍 1（桥对低成本地形无额外效果）');
+  // 桥对敌方单位同样生效（桥是格子属性，敌我皆可利用）
+  const foe = mkUnit('militia', 'enemy', 4, 4);
+  game.units.push(foe);
+  eq(ctx.movementCost(game, foe, 4, 4), 1, '敌方单位过桥同样享受成本 -1');
 }
 
 // ---------------------------------------------------------------------------

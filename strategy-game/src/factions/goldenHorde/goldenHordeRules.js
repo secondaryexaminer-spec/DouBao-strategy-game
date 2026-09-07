@@ -6,6 +6,7 @@
 
 import * as raid from './raiding.js';
 import * as camp from './nomadCamp.js';
+import * as nations from './nationMechanics.js';
 
 export const goldenHordeSystem = {
   id: 'goldenHorde',
@@ -13,29 +14,38 @@ export const goldenHordeSystem = {
   // 注册时调用一次：挂载 debug/test 入口（globalThis.__goldenHordeDebug，浏览器控制台可用）
   init(ctx) {
     attachDebug(ctx);
+    nations.attachDebug(ctx);
   },
 
   // turnStart：先无条件重置掠袭去重标记（raided 作用于被打方，所有 owner 回合都要清），
-  // 再处理营地过期/维护/决策（内部判断金帐 owner）。
+  // 再处理营地过期/维护/决策（内部判断金帐 owner）+ 国家机制（首攻标记重置/绿洲回血）。
   onTurnStart(ctx, payload) {
     raid.onTurnStart(ctx, payload);
     camp.onTurnStart(ctx, payload);
+    nations.onTurnStart(ctx, payload);
   },
 
-  // beforeMove：raided 移动力 -1（预扣；付不起则 cancel）
+  // beforeMove：raided 移动力 -1（预扣；付不起则 cancel）+ 国家机制（无 beforeMove 项）
   onBeforeMove(ctx, payload) {
     raid.onBeforeMove(ctx, payload);
   },
 
-  // afterAttack：掠袭收益（击杀战利品）+ raided 标记（未击杀）
+  // beforeAttack：国家机制（可汗威望骑兵首攻/绿洲对骑兵/蓝帐伏击首攻，只改 result.damage）
+  onBeforeAttack(ctx, payload) {
+    nations.onBeforeAttack(ctx, payload);
+  },
+
+  // afterAttack：掠袭收益（击杀战利品）+ raided 标记（未击杀）+ 国家机制（威望/绿洲/撤离）
   onAfterAttack(ctx, payload) {
     raid.onAfterAttack(ctx, payload);
+    nations.onAfterAttack(ctx, payload);
   },
 
   // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
   reset() {
     raid.resetForTests();
     camp.resetForTests();
+    nations.resetForTests();
   },
 };
 

@@ -75,12 +75,11 @@ export function computeDamage(game, attacker, defender, fromCell, toCell, isCoun
   const elephantBonus = attacker.type === 'annamElephant' && defenseMeta.domain === 'land' && !defenseMeta.charge ? 5 : 0;
   // 国家机制：攻防加成
   let nationAtk = 0, nationDef = 0;
-  if (atkNation === 'goldenHordeCore' && attackMeta.charge) nationAtk += 1; // 金帐本部：骑兵攻击+1
+  // （阶段3 移除：金帐本部骑兵攻+1 → 可汗威望接管（nationMechanics.js）；白帐对骑兵+2 →
+  //  绿洲网络接管；蓝帐步兵防+1 → 伏击阵地接管）
   if (atkNation === 'veniceCore' && attackMeta.domain === 'sea') nationAtk += 1; // 威尼斯本部：海军攻击+1
   if (atkNation === 'syria' && attackerFaction !== defenderFaction) nationAtk += 1; // 叙利亚：对异联盟攻击+1
-  if (atkNation === 'whiteHorde' && defenseMeta.charge) nationAtk += 2; // 白帐：对骑兵伤害+2
   if (atkNation === 'prussia' && !!getSite(game, toCell.x, toCell.y)) nationAtk += 3; // 普鲁士：对据点内单位伤害+3
-  if (defNation === 'blueHorde' && defenseMeta.domain === 'land' && !defenseMeta.charge) nationDef += 1; // 蓝帐：步兵防御+1
   if (defNation === 'baghdad' && defender.type === 'caliphScholar') nationDef += 2; // 巴格达：光环单位自身防御+2
   const base = (attackMeta.atk + attackBuff + attacker.rank + elephantBonus + nationAtk) * attackHpFactor + charge;
   const shield = (defenseMeta.def + defenseBuff + guardBonus + nationDef) * defendHpFactor;

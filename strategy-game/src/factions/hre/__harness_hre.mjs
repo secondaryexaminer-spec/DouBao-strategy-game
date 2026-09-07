@@ -10,6 +10,7 @@ import { decisionSystem } from '../../core/decision.js';
 import { TYPES, TERRAIN } from '../../core/constants.js';
 import * as fort from './fortification.js';
 import { hreSystem } from './hreRules.js';
+import * as nations from './nationMechanics.js';
 
 let passed = 0;
 let failed = 0;
@@ -423,6 +424,50 @@ console.log('== G12 建造资格 ==');
   eq(fort.isBuilderUnit(ctx, knight), false, '骑兵不可建造工事');
   eq(fort.isBuilderUnit(ctx, inf), true, '神罗步兵可建造工事');
   eq(fort.buildOptionsFor(ctx, knight).length, 1, '骑兵只有"不建"选项');
+}
+
+// ---------------------------------------------------------------------------
+// N1 国家机制：普鲁士军阵协同（阶段3）
+// ---------------------------------------------------------------------------
+console.log('== N1 普鲁士军阵协同 ==');
+{
+  freshGame({ settings: { faction: 'hre', nation: 'prussia' } });
+  const prussian = mkUnit('prussianGrenadier', 'player', 4, 4);
+  const ally = mkUnit('heavyInfantry', 'player', 5, 4);
+  game.units.push(prussian, ally);
+  prussian.move = 3;
+  beforeMove(prussian, 4, 4, 4, 3);
+  eq(prussian.move, 4, '军阵协同：相邻友军首次移动预支 +1（3→4）');
+  prussian.move = 2;
+  beforeMove(prussian, 4, 3, 4, 2);
+  eq(prussian.move, 2, '同回合第二次移动不重复预支');
+  turnStart('player');
+  prussian.move = 3;
+  beforeMove(prussian, 4, 2, 4, 1);
+  eq(prussian.move, 4, '新回合首次移动恢复预支');
+  // 无友军不触发
+  freshGame({ settings: { faction: 'hre', nation: 'prussia' } });
+  const lone = mkUnit('prussianGrenadier', 'player', 4, 4);
+  game.units.push(lone);
+  lone.move = 3;
+  beforeMove(lone, 4, 4, 4, 3);
+  eq(lone.move, 3, '无相邻友军不触发军阵协同');
+}
+
+// ---------------------------------------------------------------------------
+// N2 国家机制：巴伐利亚山地防线（阶段3）
+// ---------------------------------------------------------------------------
+console.log('== N2 巴伐利亚山地防线 ==');
+{
+  freshGame({ settings: { faction: 'hre', nation: 'bavaria' } });
+  game.terrain[4][4] = 'hill';
+  const mountaineer = mkUnit('bavarianMountaineer', 'player', 4, 4);
+  const foe = mkUnit('militia', 'enemy', 3, 4);
+  game.units.push(mountaineer, foe);
+  eq(beforeAttack(foe, mountaineer, 6).result.damage, 5, '丘陵受击 -1（6→5）');
+  const flat = mkUnit('bavarianMountaineer', 'player', 5, 5);
+  game.units.push(flat);
+  eq(beforeAttack(foe, flat, 6).result.damage, 6, '平地无山地防线加成');
 }
 
 // ---------------------------------------------------------------------------

@@ -50,6 +50,12 @@ export const facilitySystem = {
   getFacilityAt(x, y) {
     return facilities.find(f => f.x === x && f.y === y) || null;
   },
+  // 通用移动成本修正（阶段3 裁决③）：该格设施声明 data.moveCostMod 时叠加到地形成本。
+  // core 不识别具体设施类型（如大明临时桥），只认数据字段；无修正设施返回 0。
+  getMoveCostModAt(x, y) {
+    const f = facilities.find(f => f.x === x && f.y === y && typeof (f.data && f.data.moveCostMod) === 'number');
+    return f ? f.data.moveCostMod : 0;
+  },
   getFacilitiesByOwner(owner) {
     return facilities.filter(f => f.owner === owner);
   },

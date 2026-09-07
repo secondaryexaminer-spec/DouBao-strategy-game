@@ -4,6 +4,7 @@
 // 有副作用的 moveUnit（改单位状态 + 触发占领）暂留 main.js。
 import { TERRAIN } from './constants.js';
 import { typeMeta, cellKey } from './utils.js';
+import { facilitySystem } from './facility.js';
 
 function inBounds(x, y, w, h) {
   return x >= 0 && y >= 0 && x < w && y < h;
@@ -35,7 +36,11 @@ export function movementCost(game, unitEntry, x, y) {
   if (nation === 'blueHorde' && terrain === 'snow') return 1;
   if ((nation === 'bavaria' || nation === 'joseon') && terrain === 'hill') return 1;
   if (nation === 'annam' && terrain === 'forest') return 1;
-  return baseCost;
+  // 设施通用修正（阶段3 裁决③）：facilitySystem 提供 getMoveCostModAt（facility.data
+  // .moveCostMod 是数字时叠加到地形成本，最低 1）。core 不识别具体设施类型，只认数据字段。
+  let cost = baseCost;
+  cost += facilitySystem.getMoveCostModAt(x, y);
+  return Math.max(1, cost);
 }
 
 export function passable(game, unitEntry, x, y) {

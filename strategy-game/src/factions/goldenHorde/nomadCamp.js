@@ -14,6 +14,7 @@
 //  - GH-01 生产完成后由本模块广播 productionCompleted（site 字段传营地 facility）。
 
 import { isGoldenHordeOwner } from './raiding.js';
+import { inOasisNetwork, getPrestige, GOLDEN_HORDE_NATION as GHN } from './nationMechanics.js';
 
 // ---------------------------------------------------------------------------
 // 数值配置（最终值以此为准；阶段5统一平衡时可再调）
@@ -21,7 +22,7 @@ import { isGoldenHordeOwner } from './raiding.js';
 export const NOMAD_CAMP = {
   type: 'nomadCamp',
   buildCost: 25,    // 建造费用
-  duration: 5,      // 存在回合数（金帐本部营地+2 为阶段3国家机制，本模块预留 duration 乘区）
+  duration: 5,      // 基础存在回合数；金帐本部 +2（阶段3 国家机制）、绿洲网络内 +1 由建造时叠加
   upkeep: 2,        // 每回合维护费
   maxCamps: 2,      // 每方同时存在的游牧营地上限
   migrateRange: 2,  // 迁移候选格：营地切比雪夫距离 <= 2
@@ -124,15 +125,19 @@ export function resolveBuild(ctx, owner, unitId, choiceId) {
     return false;
   }
   if (!ctx.spendGold(owner, NOMAD_CAMP.buildCost)) return false;
+  // 阶段3 国家机制：金帐本部营地 +2 回合；绿洲网络内营地 +1 回合
+  const natBonus = ctx.ownerNation(owner) === 'goldenHordeCore' ? 2 : 0;
+  const oasisBonus = inOasisNetwork(ctx, unit.x, unit.y) ? 1 : 0;
+  const totalDuration = NOMAD_CAMP.duration + natBonus + oasisBonus;
   const fac = ctx.createFacility(NOMAD_CAMP.type, owner, unit.x, unit.y, {
-    duration: NOMAD_CAMP.duration,
+    duration: totalDuration,
     data: { builtTurn: ctx.game.turn },
   });
   // 建造消耗本回合行动（与 main.js consumeAction 一致）
   unit.acted = true;
   unit.move = 0;
   unit.hasAttacked = true;
-  ctx.log(`${ctx.typeMeta(unit.type).name}在（${unit.x},${unit.y}）建立了游牧营地，可维持 ${NOMAD_CAMP.duration} 回合。`, 'system');
+  ctx.log(`${ctx.typeMeta(unit.type).name}在（${unit.x},${unit.y}）建立了游牧营地，可维持 ${totalDuration} 回合。`, 'system');
   return !!fac;
 }
 
@@ -207,7 +212,8 @@ export function doProduce(ctx, owner, camp, type) {
     ctx.log('营地格已被占用，无法生产。', 'warning');
     return false;
   }
-  const cost = meta.cost;
+  // 阶段3 国家机制：可汗威望 10 → 营地生产更高效（成本 -20%，口径见 nationMechanics.js）
+  const cost = getPrestige(ctx, owner) >= GHN.tierCamp ? Math.ceil(meta.cost * GHN.tierCampCostMult) : meta.cost;
   if (!ctx.spendGold(owner, cost)) {
     ctx.log('金币不足，无法生产。', 'warning');
     return false;
