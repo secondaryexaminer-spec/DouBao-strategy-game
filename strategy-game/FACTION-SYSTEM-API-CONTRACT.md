@@ -70,7 +70,7 @@ export const eventBus = {
 | `unitKilled` | removeUnit 执行时（含溅射/反击击杀） | `{killer, victim, context:'attack'|'splash'|'counter'|'other'}` | — | — |
 | `siteCaptured` | captureSite 占领成功后 | `{unit, site, oldOwner}` | — | — |
 | `incomeCalculated` | grantIncome 算出金额后、写入 goldByOwner 前 | `{owner, amount}` | `amount` | — |
-| `productionCompleted` | 造兵/造船/建营地完成后 | `{owner, unit?, site?, kind:'unit'|'ship'|'camp'}` | — | — |
+| `productionCompleted` | 造兵/造船/建营地完成后（v1.2 已埋：buildAtSite 成功分支；金帐营地生产由金帐模块用 ctx.events.emit 同事件） | `{owner, unit, site, kind:'unit'|'ship'|'camp'}`（site 可为 siteEntry 或 facility） | — | — |
 
 ### 2.3 beforeAttack 精确定义（重点）
 
@@ -116,9 +116,13 @@ addStatus(unitId, key, turns, data?)   // 同 key 同 unit 默认刷新 turns（
 removeStatus(unitId, key)
 hasStatus(unitId, key) -> bool
 getStatus(unitId, key) -> {key, turns, data} | null
-tickStatuses(owner)                      // 该 owner 所有单位的 status turns-1，归零移除
+tickStatuses(aliveUnitIds)             // v1.2 签名更正：传入当前全部存活单位 id 列表；
+                                       // 不在列表者（死亡）状态清理，存活者 turns-1 归零移除。
+                                       // main.js beginTurn 开头全量接线（早于 turnStart emit）。
 getAllStatuses(unitId) -> array
 ```
+
+- **tick 接线语义（v1.2 确认，GH-03）**：`main.js beginTurn` 在 `if(!initial)` 块之前调用 `tickStatuses(game.units.map(u => u.id))`——每 beginTurn 衰减一次**全量存活单位**状态。**禁止只传当前 owner**：status.js 对不在列表者执行删除，会误删其他 owner 存活单位的状态。联盟系统写入 turns 时按此频率推导：金帐 `raided` 写 **turns=3**（敌方回合 tick→2 移动-1 全程生效；金帐下轮 tick→1 攻击时额外收益生效；再下轮归零——"持续 1 回合"= 敌方恰好 1 个完整回合，额外收益窗口 = 下一个金帐回合）。
 
 - 预设 key（阶段2各系统使用，阶段1只定义不使用）：
   `raided`（被掠袭，移动-1/回血减半）、`fortified`（驻工事，防御+）、`crossfire`（被交叉火力，防御-）、`hidden`（隐身）、`ambush`（伏击就绪）、`overwatch`（警戒）。
@@ -251,6 +255,10 @@ const factionContext = {
   // —— 决策查询（v1.1：debug/UI 层不得直接 import core/decision.js） ——
   getPendingDecisions(owner),
 
+  // —— 单位创建（v1.2，GH-02：委托 main.js 闭包 unit() 工厂，randomId/字段与主流程一致；
+  //    内部 push 并计入 produced 统计；不做金币/上限/位置校验，业务由调用方自查） ——
+  createUnit(type, owner, x, y) -> unitEntry | null,
+
   // —— 纯函数转发（v1.1：core 纯函数经 ctx 统一转发，联盟系统不得直接 import） ——
   diagonalDist(a, b),
   movementCost(game, unitEntry, x, y),
@@ -376,6 +384,14 @@ export const factionRegistry = {
 
 ### 变更记录
 
+**v1.2（2026-09-07，GH 接口申请单处理）**
+- `§3.1` `tickStatuses` 签名更正为 `tickStatuses(aliveUnitIds)`（原文档写 owner，与实际实现不符）；新增 tick 接线语义与 `raided turns=3` 推导结论（见 §3.1 说明块）。
+- `§2.2` `productionCompleted` 已埋点：buildAtSite 成功分支 emit `{owner, unit, site, kind:'unit'|'ship'}`；金帐营地生产等联盟侧生产路径由联盟模块用 `ctx.events.emit('productionCompleted', ...)` 广播同一事件。
+- `§5` 新增 `createUnit(type, owner, x, y)`：经 main.js deps 注入，委托闭包 `unit()` 工厂；push + produced 统计；不做业务校验。
+- `main.js` 三处修改：buildAtSite 埋点、beginTurn 全量 tick 接线（`if(!initial)` 块前）、initFactionSystems deps 新增 createUnit。
+- 待办登记：GH-04（raided 回血限制，需 beforeHeal）/ GH-05（营地/补给摧毁奖励，需 siteDestroyed）降级；GH-06（beforeHeal Hook）/ GH-07（siteDestroyed 事件）/ GH-08（getStatus/getAllStatuses 经 ctx 暴露）/ GH-09（unitKilled payload 对齐）排期后续。
+- 影响范围：无既有订阅者依赖（productionCompleted 无订阅、tick 对 HRE frontline 先清后重建、createUnit 为新增能力）→ 固定 seed 零变化预期，以回归验证为准。
+
 **v1.1（2026-09-07，HRE 集成验收）**
 - `§5` FactionContext 补全：设施维护/查询（`expireFacilities/getFacilitiesByOwner/getFacilitiesByType/getFacilitiesInRange/getAllFacilities`）、决策查询（`getPendingDecisions`）、纯函数转发（`diagonalDist/movementCost/areAllies`）。
 - `§5` 新增强制边界规则：联盟系统禁止直接 import 任何 `core/` 状态性模块；纯函数同样经 ctx 转发；能力缺口向主对话申请补入 context。
@@ -386,4 +402,4 @@ export const factionRegistry = {
 
 ---
 
-*契约版本：v1.1（2026-09-07，HRE 集成后）*
+*契约版本：v1.2（2026-09-07，GH 接口申请单处理后）*

@@ -40,9 +40,12 @@
 - 附属对话 handoff 规范见施工图第五节（路径/必读/硬约束/验收/回传）。
 
 ## 踩坑与根因（按时间倒序）
-- **2026-09-07 · sim 里 AI 联盟默认全是 hre+austria**：`newGame` 里 `$('ai${i}Faction')?.value || 'hre'`，而 sim/run.js 的 config **没有注入 `ai${i}Faction/Nation`**，elFor shim 返回 `''` → 回退到 `'hre'/'austria'`。含义：所有无头 sim 场景的 AI 实际全是神罗（v0.1.2 起即如此），后续联盟（金帐等）接入后 sim 仍只测神罗路径。**待办：sim/run.js 增加 faction/nation 注入支持**（在开始金帐前做，否则 B/C/D/E 的机制无法在无头环境验证）。
+- **2026-09-07 · tickStatuses 只传 owner 会误删其他方状态**：status.js 的 `tickStatuses(aliveUnitIds)` 对"不在列表者"执行**删除**（status.js:39-41）。若只传当前 owner 存活单位，其他 owner 存活单位的状态（如敌方单位的 raided）会在该方回合被误删，金帐"下轮攻击额外收益"永远失效。**必须传全量**：`tickStatuses(game.units.map(u => u.id))`（main.js beginTurn 开头、if(!initial) 前、早于 turnStart emit）。
+- **2026-09-07 · raided 写 turns=3 而非 2**：在"每 beginTurn 全量 tick 一次"语义下，turns=2 会在金帐下轮攻击前被清 0（额外收益失效）；turns=3 才能保证：敌方回合 tick→2（移动-1 覆盖敌方恰好 1 个完整回合）→ 金帐下轮 tick→1（攻击时额外收益生效）→ 再下轮归零。玩家可见"持续1回合"= 敌方 1 个完整回合。
+- **2026-09-07 · ctx.createUnit 必须经 main.js deps 注入**：单位工厂 `unit()`/`randomId()` 在 main.js 闭包内，factionContext.js 无法 import——由 initFactionSystems deps 注入 `createUnit(type,owner,x,y)`（复用 unit() 工厂 + push + incrementStat('produced')），ctx 只转发。unitCreated 未埋（main.js 全部生产路径统一排期补，不在 createUnit 半埋）。
+- **2026-09-07 · sim 里 AI 联盟默认全是 hre+austria**：`newGame` 里 `$('ai${i}Faction')?.value || 'hre'`，而 sim/run.js 的 config **没有注入 `ai${i}Faction/Nation`**，elFor shim 返回 `''` → 回退到 `'hre'/'austria'`。含义：所有无头 sim 场景的 AI 实际全是神罗（v0.1.2 起即如此），后续联盟（金帐等）接入后 sim 仍只测神罗路径。**已解决（2026-09-07）：sim/run.js 支持 `ai${i}Faction/Nation` 注入，仅显式传参时生效**。
 - **2026-09-07 · HRE 接线后 seed777 零变化的原因**：sim 无 `player` owner → 神罗建造决策不发起（`owner==='player'` 分支）→ 无工事 → 木栅税/阵线/工事效果全不触发；兵种联动在本次对局未改变终局统计。这是"预期内零变化"，不是接线失败（接线已由 __hreDebug 挂载冒烟证明）。
-- **2026-09-07 · suite 耗时翻倍**：HRE 接入后 suite 163.5s（Phase1 约 74~84s）。根因：beforeAttack/afterAttack 钩子每次攻击全单位扫描（hasAdjacentFriendlyInfantry/royalGuardNear/getFacilitiesInRange）。正确性无影响，性能回归待优化（空间索引）。
+- **2026-09-07 · suite 耗时约 120~164s**：HRE beforeAttack/afterAttack 钩子每次攻击全单位扫描导致性能回归（Phase1 约 74~84s）。正确性无影响，待优化（空间索引）。
 - **2026-09-06 · PowerShell 5.1 不支持 &&**：给用户的终端提交命令用了 `git add -A && git commit -m "..." && git push`，用户的 PowerShell 5.1 报"不支持 &&"。**教训：给用户的终端命令一律用 `;` 分隔，不用 `&&`**（用户环境是 Windows PowerShell 5.1，不是 PowerShell 7+）。
 - **2026-09-05 · 抽取边界事故**：重构删除段用字符串锚点（`siteBonus` 定义 → `attack` 定义）定位，未核实区间内是否含其他函数，误删了有副作用的 `removeUnit`，导致 sim 报 `removeUnit is not defined`。教训：**切段删除前先列出区间内全部函数清单，副作用函数（改状态/日志/统计）一律留在 main.js**；错误信息直接指认根因（黑箱协议第 4 步）。
 - **2026-09-05 · 编码事故**：用 PowerShell `Get-Content -Raw` + `Set-Content -Encoding utf8` 改 main.js，导致全部中文变乱码（PS 5.1 默认按 ANSI/GBK 读取 UTF-8 文件）。根因链：PS 读取编码错误 → 乱码 → esbuild 报 Unterminated regular expression。**教训：改含中文的 JS 文件禁止用 PowerShell 文本管道，一律用 Node 脚本或 Read/Edit 工具；git restore 可回滚。**

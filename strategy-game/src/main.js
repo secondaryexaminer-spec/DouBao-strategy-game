@@ -64,6 +64,15 @@ import { hreSystem } from './factions/hre/hreRules.js';
         game.goldByOwner[owner] -= amount;
         return true;
       },
+      // v0.2 GH-02：合规单位创建通道。委托闭包 unit() 工厂（randomId/字段与主流程
+      // 完全一致），push 后计入 produced 统计。金币/上限/位置校验与日志由调用方负责。
+      createUnit: (type, owner, x, y) => {
+        if (!typeMeta(type)) return null;
+        const created = unit(type, owner, x, y);
+        game.units.push(created);
+        incrementStat('produced', owner, 1);
+        return created;
+      },
     });
     factionRegistry.register('hre', hreSystem, factionCtx);
     return factionCtx;
@@ -1156,6 +1165,11 @@ import { hreSystem } from './factions/hre/hreRules.js';
     game.side = owner;
     game.buildsThisTurn = game.buildsThisTurn || {};
     game.buildsThisTurn[owner] = 0;
+    // v0.2 GH-03：状态系统统一接线。每 beginTurn 开头衰减一次全量存活单位状态
+    // （死亡单位状态随之清理）；必须早于 turnStart emit（否则 HRE 每回合重建的
+    // frontline 会被紧随的 tick 立即清掉）。传全量 units 而非仅 owner，避免误删
+    // 其他 owner 存活单位的状态（status.js 对不在列表者执行删除）。
+    statusSystem.tickStatuses(game.units.map(u => u.id));
     if (!initial) {
       decayFrontMemory(owner);
       decayTemporarySites(owner);
@@ -1488,16 +1502,21 @@ import { hreSystem } from './factions/hre/hreRules.js';
     }
     recordBuild(owner, builtUnits);
     game.goldByOwner[owner] -= totalCost;
+    let created = null;
     if (isTransportType(type)) {
-      game.units.push(createLoadedTransport(owner, siteEntry.x, siteEntry.y, cargoTypes, type));
+      created = createLoadedTransport(owner, siteEntry.x, siteEntry.y, cargoTypes, type);
+      game.units.push(created);
       log(`${ownerName(owner)}在${siteEntry.name}下水了${typeMeta(type).name}，预载 ${describeCargo(cargoTypes)}。`, 'system');
       incrementStat('produced', owner, 1 + cargoTypes.length);
     } else {
-      game.units.push(unit(type, owner, siteEntry.x, siteEntry.y));
+      created = unit(type, owner, siteEntry.x, siteEntry.y);
+      game.units.push(created);
       log(`${ownerName(owner)}在${siteEntry.name}部署了${typeMeta(type).name}。`, 'system');
       incrementStat('produced', owner, 1);
     }
     recordStatSnapshot('build');
+    // v0.2 GH-01：productionCompleted 实际埋点（契约 §2.2）。无订阅者时空转，零行为变化。
+    eventBus.emit('productionCompleted', { owner, unit: created, site: siteEntry, kind: isTransportType(type) ? 'ship' : 'unit' });
     return true;
   }
 

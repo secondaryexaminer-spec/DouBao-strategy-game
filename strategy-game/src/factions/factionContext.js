@@ -47,6 +47,9 @@ export function createFactionContext(deps) {
     movementCost: (game, unitEntry, x, y) => movementCostPure(game, unitEntry, x, y),
     areAllies: (teams, a, b) => areAlliesPure(teams, a, b),
 
+    // —— 单位创建（v1.2：GH-02，委托 main.js 闭包 unit() 工厂；不做金币/上限/位置校验，业务由调用方自查） ——
+    createUnit: (type, owner, x, y) => deps.createUnit(type, owner, x, y),
+
     // —— 安全动作（不改变战斗流程） ——
     log: deps.log,
     addGold: deps.addGold,

@@ -981,6 +981,8 @@
       diagonalDist: (a, b) => diagonalDist(a, b),
       movementCost: (game, unitEntry, x, y) => movementCost(game, unitEntry, x, y),
       areAllies: (teams, a, b) => areAllies(teams, a, b),
+      // —— 单位创建（v1.2：GH-02，委托 main.js 闭包 unit() 工厂；不做金币/上限/位置校验，业务由调用方自查） ——
+      createUnit: (type, owner, x, y) => deps.createUnit(type, owner, x, y),
       // —— 安全动作（不改变战斗流程） ——
       log: deps.log,
       addGold: deps.addGold,
@@ -1541,6 +1543,15 @@
           if ((game.goldByOwner[owner] || 0) < amount) return false;
           game.goldByOwner[owner] -= amount;
           return true;
+        },
+        // v0.2 GH-02：合规单位创建通道。委托闭包 unit() 工厂（randomId/字段与主流程
+        // 完全一致），push 后计入 produced 统计。金币/上限/位置校验与日志由调用方负责。
+        createUnit: (type, owner, x, y) => {
+          if (!typeMeta(type)) return null;
+          const created = unit(type, owner, x, y);
+          game.units.push(created);
+          incrementStat("produced", owner, 1);
+          return created;
         }
       });
       factionRegistry.register("hre", hreSystem, factionCtx);
@@ -2526,6 +2537,7 @@
       game.side = owner;
       game.buildsThisTurn = game.buildsThisTurn || {};
       game.buildsThisTurn[owner] = 0;
+      statusSystem.tickStatuses(game.units.map((u) => u.id));
       if (!initial) {
         decayFrontMemory(owner);
         decayTemporarySites(owner);
@@ -2838,16 +2850,20 @@
       }
       recordBuild(owner, builtUnits);
       game.goldByOwner[owner] -= totalCost;
+      let created = null;
       if (isTransportType(type)) {
-        game.units.push(createLoadedTransport(owner, siteEntry.x, siteEntry.y, cargoTypes, type));
+        created = createLoadedTransport(owner, siteEntry.x, siteEntry.y, cargoTypes, type);
+        game.units.push(created);
         log(`${ownerName(owner)}在${siteEntry.name}下水了${typeMeta(type).name}，预载 ${describeCargo(cargoTypes)}。`, "system");
         incrementStat("produced", owner, 1 + cargoTypes.length);
       } else {
-        game.units.push(unit(type, owner, siteEntry.x, siteEntry.y));
+        created = unit(type, owner, siteEntry.x, siteEntry.y);
+        game.units.push(created);
         log(`${ownerName(owner)}在${siteEntry.name}部署了${typeMeta(type).name}。`, "system");
         incrementStat("produced", owner, 1);
       }
       recordStatSnapshot("build");
+      eventBus.emit("productionCompleted", { owner, unit: created, site: siteEntry, kind: isTransportType(type) ? "ship" : "unit" });
       return true;
     }
     function upgradeSite(owner, siteEntry) {
