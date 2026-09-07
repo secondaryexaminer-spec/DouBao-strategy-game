@@ -684,10 +684,10 @@
   var MULTIPLIER = 1664525;
   var INCREMENT = 1013904223;
   function createRng(seed) {
-    let state = seed >>> 0;
+    let state2 = seed >>> 0;
     return function rng() {
-      state = state * MULTIPLIER + INCREMENT >>> 0;
-      return state / MODULUS;
+      state2 = state2 * MULTIPLIER + INCREMENT >>> 0;
+      return state2 / MODULUS;
     };
   }
 
@@ -755,6 +755,756 @@
     return seen;
   }
 
+  // src/core/events.js
+  var handlers = /* @__PURE__ */ new Map();
+  var eventBus = {
+    on(eventName, handler) {
+      if (!handlers.has(eventName)) handlers.set(eventName, /* @__PURE__ */ new Set());
+      handlers.get(eventName).add(handler);
+      return () => this.off(eventName, handler);
+    },
+    off(eventName, handler) {
+      handlers.get(eventName)?.delete(handler);
+    },
+    emit(eventName, payload) {
+      const set = handlers.get(eventName);
+      if (!set || set.size === 0) return;
+      for (const handler of set) {
+        try {
+          handler(payload);
+        } catch (e) {
+          console.error(`[eventBus] ${eventName} handler error:`, e);
+        }
+      }
+    },
+    listenerCount(eventName) {
+      return handlers.get(eventName)?.size || 0;
+    }
+  };
+
+  // src/core/status.js
+  var statuses = /* @__PURE__ */ new Map();
+  var statusSystem = {
+    addStatus(unitId, key, turns, data = null) {
+      if (!statuses.has(unitId)) statuses.set(unitId, /* @__PURE__ */ new Map());
+      const existing = statuses.get(unitId).get(key);
+      if (existing) {
+        existing.turns = Math.max(existing.turns, turns);
+        if (data != null) existing.data = data;
+      } else {
+        statuses.get(unitId).set(key, { turns, data });
+      }
+    },
+    removeStatus(unitId, key) {
+      statuses.get(unitId)?.delete(key);
+    },
+    hasStatus(unitId, key) {
+      return !!statuses.get(unitId)?.has(key);
+    },
+    getStatus(unitId, key) {
+      const s = statuses.get(unitId)?.get(key);
+      return s ? { key, turns: s.turns, data: s.data } : null;
+    },
+    getAllStatuses(unitId) {
+      const map = statuses.get(unitId);
+      if (!map) return [];
+      return [...map.entries()].map(([key, s]) => ({ key, turns: s.turns, data: s.data }));
+    },
+    tickStatuses(aliveUnitIds) {
+      for (const [unitId, map] of statuses) {
+        if (!aliveUnitIds.includes(unitId)) {
+          statuses.delete(unitId);
+          continue;
+        }
+        for (const [key, s] of map) {
+          s.turns -= 1;
+          if (s.turns <= 0) map.delete(key);
+        }
+        if (map.size === 0) statuses.delete(unitId);
+      }
+    },
+    clear() {
+      statuses.clear();
+    }
+  };
+
+  // src/core/facility.js
+  var nextId = 1;
+  var facilities = [];
+  var facilitySystem = {
+    createFacility(type, owner, x, y, opts = {}) {
+      const hp = opts.hp != null ? opts.hp : 1;
+      const f = {
+        id: `fac_${nextId++}`,
+        type,
+        owner,
+        x,
+        y,
+        hp,
+        maxHp: hp,
+        duration: opts.duration != null ? opts.duration : null,
+        // null = 不过期
+        data: opts.data || {}
+      };
+      facilities.push(f);
+      return f;
+    },
+    removeFacility(id) {
+      const i = facilities.findIndex((f) => f.id === id);
+      if (i >= 0) facilities.splice(i, 1);
+    },
+    damageFacility(id, amount) {
+      const f = facilities.find((f2) => f2.id === id);
+      if (!f) return 0;
+      f.hp -= amount;
+      if (f.hp <= 0) {
+        this.removeFacility(id);
+        return 0;
+      }
+      return f.hp;
+    },
+    expireFacilities(owner) {
+      for (let i = facilities.length - 1; i >= 0; i--) {
+        const f = facilities[i];
+        if (f.owner !== owner || f.duration == null) continue;
+        f.duration -= 1;
+        if (f.duration <= 0) facilities.splice(i, 1);
+      }
+    },
+    getFacilityAt(x, y) {
+      return facilities.find((f) => f.x === x && f.y === y) || null;
+    },
+    getFacilitiesByOwner(owner) {
+      return facilities.filter((f) => f.owner === owner);
+    },
+    getFacilitiesByType(type) {
+      return facilities.filter((f) => f.type === type);
+    },
+    getFacilitiesInRange(x, y, range) {
+      return facilities.filter((f) => Math.abs(f.x - x) <= range && Math.abs(f.y - y) <= range);
+    },
+    getAll() {
+      return [...facilities];
+    },
+    clear() {
+      facilities.length = 0;
+      nextId = 1;
+    }
+  };
+
+  // src/core/decision.js
+  var pending = /* @__PURE__ */ new Map();
+  var nextDecisionId = 1;
+  function hasUI() {
+    return typeof document !== "undefined" && typeof window !== "undefined";
+  }
+  var decisionSystem = {
+    requestDecision(decisionId, context) {
+      const id = decisionId || `dec_${nextDecisionId++}`;
+      const record = { id, context, resolved: false, choiceId: null };
+      pending.set(id, record);
+      if (!hasUI()) {
+        const choice = context.options && context.options[0];
+        const choiceId = choice ? choice.id : null;
+        console.log(`[decision:auto-resolve] ${id} → ${choiceId} (test fallback, not a game rule)`);
+        this.resolveDecision(id, choiceId);
+      }
+      return record;
+    },
+    resolveDecision(decisionId, choiceId) {
+      const record = pending.get(decisionId);
+      if (!record || record.resolved) return false;
+      record.resolved = true;
+      record.choiceId = choiceId;
+      pending.delete(decisionId);
+      if (typeof record.context.onResolve === "function") {
+        try {
+          record.context.onResolve(choiceId);
+        } catch (e) {
+          console.error(`[decision] onResolve error (${decisionId}):`, e);
+        }
+      }
+      return true;
+    },
+    cancelDecision(decisionId) {
+      const record = pending.get(decisionId);
+      if (!record || record.resolved) return false;
+      record.resolved = true;
+      pending.delete(decisionId);
+      if (typeof record.context.onCancel === "function") {
+        try {
+          record.context.onCancel();
+        } catch (e) {
+          console.error(`[decision] onCancel error (${decisionId}):`, e);
+        }
+      }
+      return true;
+    },
+    getPendingDecisions(owner) {
+      return [...pending.values()].filter((r) => r.context.owner === owner && !r.resolved);
+    },
+    getDecision(decisionId) {
+      return pending.get(decisionId) || null;
+    },
+    clear() {
+      pending.clear();
+    }
+  };
+
+  // src/factions/factionContext.js
+  function createFactionContext(deps) {
+    return {
+      // —— 只读查询 ——
+      get game() {
+        return deps.gameRef();
+      },
+      getUnit: deps.getUnit,
+      getSite: deps.getSite,
+      getFacilityAt: (x, y) => facilitySystem.getFacilityAt(x, y),
+      typeMeta: deps.typeMeta,
+      terrainMeta: deps.terrainMeta,
+      ownerFaction: deps.ownerFaction,
+      ownerNation: deps.ownerNation,
+      hasStatus: (unitId, key) => statusSystem.hasStatus(unitId, key),
+      // —— 设施维护/查询（v1.1 补全：联盟系统不得直接 import facility.js） ——
+      createFacility: (type, owner, x, y, opts) => facilitySystem.createFacility(type, owner, x, y, opts),
+      removeFacility: (id) => facilitySystem.removeFacility(id),
+      damageFacility: (id, amount) => facilitySystem.damageFacility(id, amount),
+      expireFacilities: (owner) => facilitySystem.expireFacilities(owner),
+      getFacilitiesByOwner: (owner) => facilitySystem.getFacilitiesByOwner(owner),
+      getFacilitiesByType: (type) => facilitySystem.getFacilitiesByType(type),
+      getFacilitiesInRange: (x, y, range) => facilitySystem.getFacilitiesInRange(x, y, range),
+      getAllFacilities: () => facilitySystem.getAll(),
+      // —— 决策查询（v1.1 补全：debug/UI 用，不在 UI 层直接 import decision.js） ——
+      getPendingDecisions: (owner) => decisionSystem.getPendingDecisions(owner),
+      // —— 纯函数转发（v1.1：联盟系统无需 import core 纯函数） ——
+      diagonalDist: (a, b) => diagonalDist(a, b),
+      movementCost: (game, unitEntry, x, y) => movementCost(game, unitEntry, x, y),
+      areAllies: (teams, a, b) => areAllies(teams, a, b),
+      // —— 安全动作（不改变战斗流程） ——
+      log: deps.log,
+      addGold: deps.addGold,
+      spendGold: deps.spendGold,
+      addStatus: (unitId, key, turns, data) => statusSystem.addStatus(unitId, key, turns, data),
+      removeStatus: (unitId, key) => statusSystem.removeStatus(unitId, key),
+      // —— 主动决策 ——
+      requestDecision: (decisionId, context) => decisionSystem.requestDecision(decisionId, context),
+      resolveDecision: (decisionId, choiceId) => decisionSystem.resolveDecision(decisionId, choiceId),
+      // —— 事件总线（联盟系统可自行订阅额外事件） ——
+      events: eventBus
+    };
+  }
+
+  // src/factions/factionRegistry.js
+  var systems = /* @__PURE__ */ new Map();
+  var HOOK_TO_EVENT = {
+    onTurnStart: "turnStart",
+    onTurnEnd: "turnEnd",
+    onBeforeMove: "beforeMove",
+    onAfterMove: "afterMove",
+    onBeforeAttack: "beforeAttack",
+    onAfterAttack: "afterAttack",
+    onUnitCreated: "unitCreated",
+    onUnitKilled: "unitKilled",
+    onSiteCaptured: "siteCaptured",
+    onIncomeCalculated: "incomeCalculated",
+    onProductionCompleted: "productionCompleted"
+  };
+  var REGISTER_ORDER = ["hre", "goldenHorde", "venice", "mamluk", "ming"];
+  var factionRegistry = {
+    register(factionId, system, ctx) {
+      if (!REGISTER_ORDER.includes(factionId)) {
+        console.error(`[factionRegistry] unknown factionId: ${factionId}`);
+        return;
+      }
+      system.id = factionId;
+      systems.set(factionId, system);
+      if (typeof system.init === "function") {
+        try {
+          system.init(ctx);
+        } catch (e) {
+          console.error(`[factionRegistry] ${factionId}.init error:`, e);
+        }
+      }
+      for (const [hook, event] of Object.entries(HOOK_TO_EVENT)) {
+        if (typeof system[hook] === "function") {
+          eventBus.on(event, (payload) => {
+            try {
+              system[hook](ctx, payload);
+            } catch (e) {
+              console.error(`[factionRegistry] ${factionId}.${hook} error:`, e);
+            }
+          });
+        }
+      }
+    },
+    unregister(factionId) {
+      systems.delete(factionId);
+    },
+    get(factionId) {
+      return systems.get(factionId) || null;
+    },
+    getAll() {
+      return new Map(systems);
+    },
+    getRegisteredOrder() {
+      return REGISTER_ORDER.filter((id) => systems.has(id));
+    },
+    isRegistered(factionId) {
+      return systems.has(factionId);
+    },
+    clear() {
+      systems.clear();
+    }
+  };
+
+  // src/factions/hre/fortification.js
+  var FORTIFICATIONS = {
+    palisade: {
+      id: "palisade",
+      label: "木栅",
+      cost: 12,
+      duration: 5,
+      hp: 8,
+      desc: "敌军进入+1移动消耗；神罗步兵驻守防御+2；可被攻击摧毁"
+    },
+    trench: {
+      id: "trench",
+      label: "壕沟",
+      cost: 18,
+      duration: 8,
+      hp: 12,
+      desc: "敌方骑兵冲锋-2（最低0）；敌方第一轮攻击伤害-2"
+    },
+    stoneFort: {
+      id: "stoneFort",
+      label: "石堡",
+      cost: 36,
+      duration: null,
+      hp: 30,
+      desc: "驻守单位防御+4；相邻远程单位防御+2；相邻单位每回合回血+1；仅限城市/军营/堡垒2格内"
+    }
+  };
+  var FORT_SUPPORT_KINDS = /* @__PURE__ */ new Set(["city", "camp", "barracksSmall", "barracksLarge", "fortress"]);
+  var FRONTLINE_MIN_CHAIN = 3;
+  var FRONTLINE_HP_MULT = 1.2;
+  var FRONTLINE_HEAL = 1;
+  var STONE_FORT_RANGE = 2;
+  var STONE_FORT_HEAL = 1;
+  var FACILITY_CHIP_RATIO = 0.5;
+  var state = {
+    lastGameRef: null,
+    // 用于检测 newGame 换局，自动清空模块状态
+    baseMaxHp: /* @__PURE__ */ new Map(),
+    // facilityId -> 初始 maxHp（阵线耐久加成基准）
+    trenchFirstHit: /* @__PURE__ */ new Set(),
+    // unitId：本回合壕沟"第一轮攻击-2"已生效
+    pikeGuardUsed: /* @__PURE__ */ new Set()
+    // unitId：本回合长矛方阵"方阵-2"已生效
+  };
+  function resetState() {
+    state.baseMaxHp.clear();
+    state.trenchFirstHit.clear();
+    state.pikeGuardUsed.clear();
+  }
+  function syncGameRef(ctx) {
+    if (ctx && ctx.game !== state.lastGameRef) {
+      resetState();
+      state.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests() {
+    resetState();
+    state.lastGameRef = null;
+  }
+  function isHreOwner(ctx, owner) {
+    return !!owner && ctx.ownerFaction(owner) === "hre";
+  }
+  function isBuilderUnit(ctx, unit) {
+    if (!unit || !isHreOwner(ctx, unit.owner)) return false;
+    const meta = ctx.typeMeta(unit.type);
+    if (!meta) return false;
+    if (meta.domain !== "land") return false;
+    if (meta.charge) return false;
+    return true;
+  }
+  function isLandCell(ctx, x, y) {
+    const g = ctx.game;
+    if (!g || x < 0 || y < 0 || x >= g.w || y >= g.h) return false;
+    const t = g.terrain[y] && g.terrain[y][x];
+    return !!t && t !== "water" && t !== "mountain";
+  }
+  function nearSupportSite(ctx, unit) {
+    for (const s of ctx.game.sites) {
+      if (!FORT_SUPPORT_KINDS.has(s.kind)) continue;
+      if (!ctx.areAllies(ctx.game.teams, s.owner, unit.owner)) continue;
+      if (ctx.diagonalDist(s, unit) <= STONE_FORT_RANGE) return true;
+    }
+    return false;
+  }
+  function canBuildAt(ctx, unit, type) {
+    const def = FORTIFICATIONS[type];
+    if (!def) return false;
+    if (!isBuilderUnit(ctx, unit)) return false;
+    if (!isLandCell(ctx, unit.x, unit.y)) return false;
+    if (ctx.getSite(unit.x, unit.y)) return false;
+    if (ctx.getFacilityAt(unit.x, unit.y)) return false;
+    if ((ctx.game.goldByOwner[unit.owner] || 0) < def.cost) return false;
+    if (type === "stoneFort" && !nearSupportSite(ctx, unit)) return false;
+    return true;
+  }
+  function buildOptionsFor(ctx, unit) {
+    const options = [{ id: "none", label: "不建", description: "保留金币与本回合行动，不建造工事。" }];
+    if (!isBuilderUnit(ctx, unit)) return options;
+    const gold = ctx.game.goldByOwner[unit.owner] || 0;
+    if (gold >= FORTIFICATIONS.palisade.cost) {
+      const d = FORTIFICATIONS.palisade;
+      options.push({ id: d.id, label: `建${d.label}`, description: `${d.desc}（${d.cost}金币，持续${d.duration}回合）` });
+    }
+    if (gold >= FORTIFICATIONS.trench.cost) {
+      const d = FORTIFICATIONS.trench;
+      options.push({ id: d.id, label: `建${d.label}`, description: `${d.desc}（${d.cost}金币，持续${d.duration}回合）` });
+    }
+    if (gold >= FORTIFICATIONS.stoneFort.cost && nearSupportSite(ctx, unit)) {
+      const d = FORTIFICATIONS.stoneFort;
+      options.push({ id: d.id, label: `建${d.label}`, description: `${d.desc}（${d.cost}金币，永久）` });
+    }
+    return options;
+  }
+  function requestBuildDecision(ctx, unit) {
+    if (!unit || !isBuilderUnit(ctx, unit)) return null;
+    if (!isLandCell(ctx, unit.x, unit.y)) return null;
+    if (ctx.getSite(unit.x, unit.y)) return null;
+    if (ctx.getFacilityAt(unit.x, unit.y)) return null;
+    if ((ctx.game.goldByOwner[unit.owner] || 0) < FORTIFICATIONS.palisade.cost) return null;
+    const options = buildOptionsFor(ctx, unit);
+    if (options.length <= 1) return null;
+    const owner = unit.owner;
+    const unitId = unit.id;
+    const decisionId = `hreFort_${unitId}`;
+    return ctx.requestDecision(decisionId, {
+      owner,
+      unitId,
+      title: "帝国工事",
+      description: `${ctx.typeMeta(unit.type).name}可在此格建造工事（消耗本回合行动并花费金币）。`,
+      options,
+      onResolve: (choiceId) => {
+        resolveBuild(ctx, owner, unitId, choiceId);
+      }
+    });
+  }
+  function resolveBuild(ctx, owner, unitId, choiceId) {
+    const unit = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit || unit.owner !== owner) return false;
+    if (!choiceId || choiceId === "none") return false;
+    const def = FORTIFICATIONS[choiceId];
+    if (!def) return false;
+    if (!canBuildAt(ctx, unit, choiceId)) {
+      ctx.log(`${ctx.typeMeta(unit.type).name}无法在此格建造${def.label}（条件不再满足）。`, "warning");
+      return false;
+    }
+    if (!ctx.spendGold(owner, def.cost)) return false;
+    const fac = ctx.createFacility(choiceId, owner, unit.x, unit.y, { hp: def.hp, duration: def.duration });
+    state.baseMaxHp.set(fac.id, def.hp);
+    unit.acted = true;
+    unit.move = 0;
+    unit.hasAttacked = true;
+    ctx.log(`${ctx.typeMeta(unit.type).name}在（${unit.x},${unit.y}）建立了${def.label}，帝国防线扩展。`, "system");
+    return true;
+  }
+  function computeFrontline(ctx, owner) {
+    const facilities2 = ctx.getFacilitiesByOwner(owner).filter((f) => isHreOwner(ctx, f.owner));
+    const sites = ctx.game.sites.filter((s) => isHreOwner(ctx, s.owner));
+    const nodes = [
+      ...facilities2.map((f) => ({ kind: "fac", ref: f, key: `f:${f.id}` })),
+      ...sites.map((s) => ({ kind: "site", ref: s, key: `s:${s.id}` }))
+    ];
+    const byKey = new Map(nodes.map((n) => [n.key, n]));
+    const adj = new Map(nodes.map((n) => [n.key, []]));
+    const at = (x, y) => {
+      for (const n of nodes) if (n.ref.x === x && n.ref.y === y) return n.key;
+      return null;
+    };
+    for (const n of nodes) {
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const k = at(n.ref.x + dx, n.ref.y + dy);
+        if (k) adj.get(n.key).push(k);
+      }
+    }
+    const seen = /* @__PURE__ */ new Set();
+    const components = [];
+    for (const n of nodes) {
+      if (seen.has(n.key)) continue;
+      const comp = [];
+      const queue = [n.key];
+      seen.add(n.key);
+      while (queue.length) {
+        const k = queue.shift();
+        comp.push(k);
+        for (const nk of adj.get(k)) {
+          if (!seen.has(nk)) {
+            seen.add(nk);
+            queue.push(nk);
+          }
+        }
+      }
+      components.push(comp);
+    }
+    const frontlined = /* @__PURE__ */ new Set();
+    for (const comp of components) {
+      if (comp.length < FRONTLINE_MIN_CHAIN) continue;
+      for (const k of comp) {
+        const node = byKey.get(k);
+        if (node.kind === "fac") frontlined.add(node.ref.id);
+      }
+    }
+    return { frontlined, facilities: facilities2, sites };
+  }
+  function applyFrontline(ctx, owner, initial) {
+    const { frontlined, facilities: facilities2 } = computeFrontline(ctx, owner);
+    const onFrontline = /* @__PURE__ */ new Set();
+    for (const f of facilities2) {
+      const wasFront = !!f.data.frontlined;
+      const isFront = frontlined.has(f.id);
+      f.data.frontlined = isFront;
+      const base = state.baseMaxHp.get(f.id) ?? f.data.baseMaxHp ?? f.maxHp;
+      state.baseMaxHp.set(f.id, base);
+      f.data.baseMaxHp = base;
+      if (isFront) {
+        const bonusMax = Math.round(base * FRONTLINE_HP_MULT);
+        f.maxHp = bonusMax;
+        f.hp = Math.min(f.hp, bonusMax);
+        if (!wasFront) ctx.log("阵线稳定：防线上的工事耐久提升。", "system");
+        const u = ctx.getUnit(f.x, f.y);
+        if (u && isHreOwner(ctx, u.owner)) onFrontline.add(u.id);
+      } else {
+        f.maxHp = base;
+        f.hp = Math.min(f.hp, base);
+        if (wasFront) ctx.log("阵线失稳：该段工事失去阵线加固。", "warning");
+      }
+    }
+    for (const unit of ctx.game.units) {
+      if (!isHreOwner(ctx, unit.owner)) continue;
+      if (onFrontline.has(unit.id)) {
+        ctx.addStatus(unit.id, "frontline", 1, { owner });
+        if (!initial && unit.hp < unit.maxHp) {
+          unit.hp = Math.min(unit.maxHp, unit.hp + FRONTLINE_HEAL);
+        }
+      } else {
+        ctx.removeStatus(unit.id, "frontline");
+      }
+    }
+    if (!initial) {
+      for (const f of facilities2) {
+        if (f.type !== "stoneFort") continue;
+        for (const unit of ctx.game.units) {
+          if (!isHreOwner(ctx, unit.owner)) continue;
+          if (ctx.diagonalDist(unit, f) <= 1 && unit.hp < unit.maxHp) {
+            unit.hp = Math.min(unit.maxHp, unit.hp + STONE_FORT_HEAL);
+          }
+        }
+      }
+    }
+    return { frontlinedCount: frontlined.size, facilityCount: facilities2.length };
+  }
+  function onTurnStart(ctx, payload) {
+    const owner = payload && payload.owner;
+    const initial = !!(payload && payload.initial);
+    syncGameRef(ctx);
+    if (!isHreOwner(ctx, owner)) return;
+    const beforeIds = new Set(ctx.getFacilitiesByOwner(owner).map((f) => f.id));
+    ctx.expireFacilities(owner);
+    for (const id of beforeIds) {
+      if (!ctx.getFacilitiesByOwner(owner).some((f) => f.id === id)) {
+        state.baseMaxHp.delete(id);
+      }
+    }
+    applyFrontline(ctx, owner, initial);
+    state.trenchFirstHit.clear();
+    state.pikeGuardUsed.clear();
+    if (owner === "player") {
+      for (const unit of ctx.game.units) {
+        if (unit.owner !== owner) continue;
+        requestBuildDecision(ctx, unit);
+      }
+    }
+  }
+  function onBeforeMove(ctx, payload) {
+    const { unit, from, to } = payload || {};
+    if (!unit || !to || !from) return;
+    if (isHreOwner(ctx, unit.owner)) return;
+    if (unit.move <= 0) return;
+    const fac = ctx.getFacilityAt(to.x, to.y);
+    if (!fac || fac.type !== "palisade" || !isHreOwner(ctx, fac.owner)) return;
+    if (ctx.areAllies(ctx.game.teams, unit.owner, fac.owner)) return;
+    const step = ctx.movementCost(ctx.game, unit, to.x, to.y);
+    const stepCost = to.x !== from.x && to.y !== from.y ? step * Math.SQRT2 : step;
+    if (unit.move < stepCost + 1) {
+      payload.cancel = true;
+      return;
+    }
+    unit.move -= 1;
+  }
+  function reduceDamage(damage, n) {
+    return Math.max(1, damage - n);
+  }
+  function isCharging(ctx, attacker, fromCell, toCell, isCounter, defender) {
+    if (isCounter) return false;
+    if (!attacker || attacker.move !== attacker.maxMove) return false;
+    const meta = ctx.typeMeta(attacker.type);
+    if (!meta || !meta.charge) return false;
+    if (defender && defender.type === "pikeSquare") return false;
+    const from = fromCell || { x: attacker.x, y: attacker.y };
+    const to = toCell || { x: attacker.x, y: attacker.y };
+    return ctx.diagonalDist(from, to) === 1;
+  }
+  function hasAdjacentFriendlyInfantry(ctx, defender) {
+    for (const u of ctx.game.units) {
+      if (u.id === defender.id) continue;
+      if (u.owner !== defender.owner) continue;
+      if (ctx.diagonalDist(u, defender) !== 1) continue;
+      const meta = ctx.typeMeta(u.type);
+      if (!meta || meta.domain !== "land" || meta.charge) continue;
+      return true;
+    }
+    return false;
+  }
+  function royalGuardNear(ctx, defender) {
+    for (const u of ctx.game.units) {
+      if (u.type !== "imperialGuard") continue;
+      if (!isHreOwner(ctx, u.owner)) continue;
+      if (ctx.diagonalDist(u, defender) > 1) continue;
+      const site = ctx.getSite(u.x, u.y);
+      if (!site) continue;
+      if (!ctx.areAllies(ctx.game.teams, site.owner, u.owner)) continue;
+      return true;
+    }
+    return false;
+  }
+  function onBeforeAttack(ctx, payload) {
+    const { attacker, defender, fromCell, toCell, result, isCounter } = payload || {};
+    if (!attacker || !defender || !result || !result.damage) return;
+    const defenderIsHre = isHreOwner(ctx, defender.owner);
+    const attackerIsHre = isHreOwner(ctx, attacker.owner);
+    if (!defenderIsHre && !(attackerIsHre && attacker.type === "siegeTower")) return;
+    if (attackerIsHre && attacker.type === "siegeTower" && ctx.getSite(defender.x, defender.y)) {
+      result.damage += 2;
+    }
+    if (!defenderIsHre) return;
+    const fac = ctx.getFacilityAt(defender.x, defender.y);
+    const defOnFort = !!fac && isHreOwner(ctx, fac.owner);
+    const atkMeta = ctx.typeMeta(attacker.type);
+    const defMeta = ctx.typeMeta(defender.type);
+    const isCavalry = !!atkMeta && !!atkMeta.charge;
+    if (defOnFort) {
+      if (fac.type === "palisade") {
+        if (isBuilderUnit(ctx, defender)) result.damage = reduceDamage(result.damage, 2);
+      } else if (fac.type === "trench") {
+        if (!state.trenchFirstHit.has(defender.id)) {
+          result.damage = reduceDamage(result.damage, 2);
+          state.trenchFirstHit.add(defender.id);
+        }
+        if (isCavalry && isCharging(ctx, attacker, fromCell, toCell, isCounter, defender)) {
+          const chargeVal = (atkMeta.charge || 0) + (ctx.ownerNation(attacker.owner) === "austria" ? 1 : 0);
+          result.damage = reduceDamage(result.damage, Math.min(chargeVal, 2));
+        }
+      } else if (fac.type === "stoneFort") {
+        result.damage = reduceDamage(result.damage, 4);
+      }
+    }
+    if (!(defOnFort && fac.type === "stoneFort")) {
+      const stoneNearby = ctx.getFacilitiesInRange(defender.x, defender.y, 1).filter((f) => f.type === "stoneFort" && isHreOwner(ctx, f.owner) && !(f.x === defender.x && f.y === defender.y));
+      if (stoneNearby.length && defMeta && defMeta.range > 1) {
+        result.damage = reduceDamage(result.damage, 2);
+      }
+    }
+    if (defender.type === "heavyInfantry" && defOnFort) {
+      result.damage = reduceDamage(result.damage, 2);
+      if (isCavalry) result.damage = reduceDamage(result.damage, 1);
+    }
+    if (defender.type === "pikeSquare" && !state.pikeGuardUsed.has(defender.id)) {
+      if (atkMeta && atkMeta.range <= 1 && hasAdjacentFriendlyInfantry(ctx, defender)) {
+        result.damage = reduceDamage(result.damage, 2);
+        state.pikeGuardUsed.add(defender.id);
+      }
+    }
+    if (royalGuardNear(ctx, defender)) {
+      result.damage = reduceDamage(result.damage, 1);
+    }
+  }
+  function onAfterAttack(ctx, payload) {
+    const { attacker, defender, result } = payload || {};
+    if (!attacker || !defender || !result) return;
+    if (isHreOwner(ctx, attacker.owner)) return;
+    const fac = ctx.getFacilityAt(defender.x, defender.y);
+    if (!fac || !isHreOwner(ctx, fac.owner)) return;
+    if (ctx.areAllies(ctx.game.teams, attacker.owner, fac.owner)) return;
+    const chip = Math.max(1, Math.round((result.damage || 0) * FACILITY_CHIP_RATIO));
+    const remaining = ctx.damageFacility(fac.id, chip);
+    const label = FORTIFICATIONS[fac.type]?.label || fac.type;
+    if (remaining <= 0) {
+      state.baseMaxHp.delete(fac.id);
+      ctx.log(`${label}在战火中被摧毁。`, "warning");
+    } else {
+      ctx.log(`${label}受到攻击受损（耐久 ${remaining}/${fac.maxHp}）。`, "warning");
+    }
+  }
+  function attachDebug(ctx) {
+    const debug = {
+      fortifications: () => ({ ...FORTIFICATIONS }),
+      facilities: () => ctx.getAllFacilities().map((f) => ({ id: f.id, type: f.type, owner: f.owner, x: f.x, y: f.y, hp: f.hp, maxHp: f.maxHp, duration: f.duration, frontlined: !!f.data.frontlined })),
+      state: () => ({
+        baseMaxHp: [...state.baseMaxHp.entries()],
+        trenchFirstHit: [...state.trenchFirstHit],
+        pikeGuardUsed: [...state.pikeGuardUsed]
+      }),
+      // 查看某 owner 当前可建造的单位及其可选方案
+      eligible: (owner) => ctx.game.units.filter((u) => u.owner === owner && isBuilderUnit(ctx, u)).map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y, options: buildOptionsFor(ctx, u).map((o) => o.id) })),
+      // 为某 owner 所有可建造单位发起建造决策（返回请求数）
+      requestForOwner: (owner) => {
+        let n = 0;
+        for (const u of ctx.game.units) {
+          if (u.owner === owner && requestBuildDecision(ctx, u)) n += 1;
+        }
+        return n;
+      },
+      // 查看未决建造决策并手动解析（浏览器 UI 阶段前的手动测试入口）
+      pending: () => ctx.getPendingDecisions("player").filter((r) => String(r.id || "").startsWith("hreFort_")).map((r) => ({ id: r.id, unitId: r.context.unitId, options: r.context.options.map((o) => o.id) })),
+      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId)
+    };
+    if (typeof globalThis !== "undefined") globalThis.__hreDebug = debug;
+    return debug;
+  }
+
+  // src/factions/hre/hreRules.js
+  var hreSystem = {
+    id: "hre",
+    // 注册时调用一次：挂载 debug/test 入口（globalThis.__hreDebug，浏览器控制台可用）
+    init(ctx) {
+      attachDebug(ctx);
+    },
+    // turnStart：工事过期、阵线检测/耐久/回血/状态、每回合追踪重置、人类玩家建造决策
+    onTurnStart(ctx, payload) {
+      onTurnStart(ctx, payload);
+    },
+    // beforeMove：木栅移动税（需主对话在 moveUnit 内补 emit 'beforeMove'，见交付报告已知问题）
+    onBeforeMove(ctx, payload) {
+      onBeforeMove(ctx, payload);
+    },
+    // beforeAttack：三种工事效果 + 4 个兵种联动（只改 result.damage）
+    onBeforeAttack(ctx, payload) {
+      onBeforeAttack(ctx, payload);
+    },
+    // afterAttack：工事可被攻击摧毁（按伤害比例受损）
+    onAfterAttack(ctx, payload) {
+      onAfterAttack(ctx, payload);
+    },
+    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
+    reset() {
+      resetForTests();
+    }
+  };
+
   // src/main.js
   (() => {
     "use strict";
@@ -772,6 +1522,30 @@
     let currentSaveKey = null;
     let toastTimer = null;
     let game = null;
+    let factionCtx = null;
+    function initFactionSystems() {
+      if (factionCtx) return factionCtx;
+      factionCtx = createFactionContext({
+        gameRef: () => game,
+        getUnit: getUnit2,
+        getSite: getSite2,
+        typeMeta,
+        terrainMeta: (k) => TERRAIN[k],
+        ownerFaction,
+        ownerNation: ownerNation2,
+        log,
+        addGold: (owner, amount) => {
+          game.goldByOwner[owner] = (game.goldByOwner[owner] || 0) + amount;
+        },
+        spendGold: (owner, amount) => {
+          if ((game.goldByOwner[owner] || 0) < amount) return false;
+          game.goldByOwner[owner] -= amount;
+          return true;
+        }
+      });
+      factionRegistry.register("hre", hreSystem, factionCtx);
+      return factionCtx;
+    }
     let fastSim = false;
     const distFieldCache = /* @__PURE__ */ new Map();
     const landReachCache = /* @__PURE__ */ new Map();
@@ -1448,6 +2222,7 @@
       toastTimer = setTimeout(() => $("toast").classList.add("hidden"), 1800);
     }
     function removeUnit(unitEntry) {
+      eventBus.emit("unitKilled", { victim: unitEntry, killer: null, reason: "removeUnit" });
       if (unitEntry.cargo?.length) {
         log(`${typeMeta(unitEntry.type).name}被击沉，船上搭载单位全部损失。`, "warning");
       }
@@ -1460,6 +2235,9 @@
     }
     function attack(attacker, defender) {
       const result = previewCombat(game, attacker, defender, { x: attacker.x, y: attacker.y }, false);
+      const atkPayload = { attacker, defender, fromCell: { x: attacker.x, y: attacker.y }, toCell: { x: defender.x, y: defender.y }, result, isCounter: false, cancel: false };
+      eventBus.emit("beforeAttack", atkPayload);
+      if (atkPayload.cancel) return;
       defender.hp -= result.damage;
       defender.lastAttacked = true;
       const atkFaction = attacker.owner === "player" ? game.settings?.faction : game.aiProfiles?.[attacker.owner]?.faction;
@@ -1508,6 +2286,7 @@
           log(`${typeMeta(attacker.type).name}在反击中被击毁。`, "battle");
         }
       }
+      eventBus.emit("afterAttack", { attacker, defender, result, defenderDead: defender.hp <= 0, attackerDead: attacker.hp <= 0 });
       checkEnd();
     }
     function strategicSiteValue(siteEntry, owner, unitEntry) {
@@ -1556,6 +2335,7 @@
       const oldTier = siteEntry.tier;
       const oldOwner = siteEntry.owner;
       siteEntry.owner = unitEntry.owner;
+      eventBus.emit("siteCaptured", { unit: unitEntry, site: siteEntry, oldOwner });
       if ((unitEntry.type === "tradeCaravan" || unitEntry.type === "ragusaCaravan") && !siteEntry._caravanBonus) {
         siteEntry.income += 5;
         siteEntry._caravanBonus = true;
@@ -1600,6 +2380,11 @@
     function moveUnit(unitEntry, x, y) {
       const cost = reachable(game, unitEntry).get(cellKey(x, y));
       if (cost === void 0 || unitEntry.hasAttacked) {
+        return false;
+      }
+      const movePayload = { unit: unitEntry, from: { x: unitEntry.x, y: unitEntry.y }, to: { x, y }, cancel: false };
+      eventBus.emit("beforeMove", movePayload);
+      if (movePayload.cancel) {
         return false;
       }
       unitEntry.x = x;
@@ -1723,7 +2508,9 @@
       if (incNation === "austria" || incNation === "egypt") nationIncomeBonus += game.sites.filter((s) => s.kind === "city" && s.owner === owner).length * 2;
       if (incNation === "genoa") nationIncomeBonus += Math.round(base * 0.1);
       const gain = Math.round(base * (game.settings?.incomeMult || 1) * factionMult) + nationIncomeBonus;
-      game.goldByOwner[owner] += gain;
+      const incomePayload = { owner, amount: gain };
+      eventBus.emit("incomeCalculated", incomePayload);
+      game.goldByOwner[owner] += incomePayload.amount;
       if (gain > 0) {
         log(`${ownerName(owner)}获得 ${gain} 金币收入。`, "gold");
       }
@@ -1761,6 +2548,7 @@
           }
         }
       }
+      eventBus.emit("turnStart", { owner, initial });
       for (const unitEntry of game.units.filter((entry) => entry.owner === owner)) {
         unitEntry.maxMove = effectiveMove(unitEntry);
         unitEntry.move = unitEntry.maxMove;
@@ -1796,6 +2584,8 @@
           }
         }
       }
+      const endedOwner = game.ownerOrder[(game.currentIndex - 1 + game.ownerOrder.length) % game.ownerOrder.length];
+      eventBus.emit("turnEnd", { owner: endedOwner });
       beginTurn(game.ownerOrder[game.currentIndex], false);
     }
     function teamStandings() {
@@ -2922,7 +3712,7 @@
     }
     function bestObjective(owner, unitEntry, intent = null) {
       const defaultAgg = AGG[game.aiProfiles?.[owner]?.agg || "balanced"] || AGG.balanced;
-      const state = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
+      const state2 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
       const memory = frontMemory(owner);
       const isSea = typeMeta(unitEntry.type).domain === "sea";
       const pool = isSea ? [intent?.navalSite, intent?.assaultSite, intent?.expansionSite, ...intent?.alternateSites || []] : [intent?.expansionSite, intent?.assaultSite, ...intent?.alternateSites || []];
@@ -2939,7 +3729,7 @@
         if (strategicSiteValue(siteEntry, owner, unitEntry) <= 0) {
           return;
         }
-        if (state.rerouteTurns > 0 && state.failedObjectiveKey === `site:${key}`) {
+        if (state2.rerouteTurns > 0 && state2.failedObjectiveKey === `site:${key}`) {
           return;
         }
         if (memory[`site:${key}`]?.cooldown > 0) {
@@ -3072,9 +3862,9 @@
       }
       return distances;
     }
-    function finalizeUnitState(unitEntry, state, objectiveKey, movedThisTurn) {
-      const stalledTurns = movedThisTurn ? 0 : state.stalledTurns + 1;
-      const rerouteTurns = movedThisTurn ? Math.max(0, state.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state.rerouteTurns - 1);
+    function finalizeUnitState(unitEntry, state2, objectiveKey, movedThisTurn) {
+      const stalledTurns = movedThisTurn ? 0 : state2.stalledTurns + 1;
+      const rerouteTurns = movedThisTurn ? Math.max(0, state2.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state2.rerouteTurns - 1);
       rememberFrontOutcome(unitEntry.owner, objectiveKey, movedThisTurn);
       if (!movedThisTurn && stalledTurns >= 2 && objectiveKey.startsWith("site:")) {
         const siteId = objectiveKey.slice(5);
@@ -3085,7 +3875,7 @@
         lastPosition: { x: unitEntry.x, y: unitEntry.y },
         stalledTurns,
         rerouteTurns,
-        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state.failedObjectiveKey
+        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state2.failedObjectiveKey
       };
     }
     function targetValue(unitEntry) {
@@ -3168,7 +3958,7 @@
     function chooseAction(owner, unitEntry, profile, intent = null) {
       const diffCfg = DIFF[profile.diff];
       const aggCfg = AGG[profile.agg];
-      const state = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
+      const state2 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
       const cells = [...reachable(game, unitEntry).entries()].map(([key, cost]) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y, cost };
@@ -3187,13 +3977,13 @@
         const moveScore = objective ? (currentPath - nextPath) * 2.9 * diffCfg.lookahead * aggCfg.push : 0;
         const supportScore = friendSupport(owner, cell.x, cell.y);
         const riskPenalty = enemyThreat(owner, cell.x, cell.y) * diffCfg.risk * aggCfg.preserve * 0.9;
-        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state.stalledTurns * 0.7);
+        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state2.stalledTurns * 0.7);
         const siteEntry = getSite2(cell.x, cell.y);
         const captureScore = siteEntry ? strategicSiteValue(siteEntry, owner, unitEntry) + cityEconomyValue(siteEntry, owner) : 0;
         const intentBonus = intent?.assaultSite ? Math.max(0, dist(unitEntry, intent.assaultSite) - dist(cell, intent.assaultSite)) * 1.4 * assaultMag : 0;
         const expansionBonus = intent?.expansionSite ? Math.max(0, dist(unitEntry, intent.expansionSite) - dist(cell, intent.expansionSite)) * 1.9 * aggCfg.expansion * expansionMag : 0;
         const futureCityPressure = objective ? Math.max(0, futureReach(unitEntry, diffCfg.lookahead) - dist(cell, objective)) * 0.35 : 0;
-        const rerouteBonus = state.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
+        const rerouteBonus = state2.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
         const terrainBonus = game.terrain[cell.y][cell.x] === "forest" ? 3 * aggCfg.forestBias : 0;
         const roleBonus = unitRoleCellBonus(owner, unitEntry, cell, intent);
         const base = moveScore + supportScore + captureScore + intentBonus + expansionBonus + futureCityPressure + rerouteBonus + terrainBonus + roleBonus - riskPenalty - congestionPenalty;
@@ -3621,18 +4411,18 @@
         if (!game.units.includes(unitEntry)) {
           continue;
         }
-        const state = computeUnitState(unitEntry);
+        const state2 = computeUnitState(unitEntry);
         const startCell = { x: unitEntry.x, y: unitEntry.y };
         const assaultKey = intent.assaultSite ? `site:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}` : null;
         const bridgeheadCooldown = assaultKey ? memory[assaultKey]?.cooldown > 0 : false;
-        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state.rerouteTurns > 0 && state.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
+        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state2.rerouteTurns > 0 && state2.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
         if (bridgeheadBlocked && typeMeta(unitEntry.type).domain === "land" && profile.agg !== "reckless") {
           const retreatCell = bestRetreatCell(owner, unitEntry, intent.assaultSite);
           if (retreatCell && (retreatCell.x !== unitEntry.x || retreatCell.y !== unitEntry.y)) {
             incrementStrat(owner, "retreats");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}从桥头暂退，在 ${intent.assaultSite.name} 方向重整。`);
             moveUnit(unitEntry, retreatCell.x, retreatCell.y);
-            finalizeUnitState(unitEntry, state, assaultKey || "idle", true);
+            finalizeUnitState(unitEntry, state2, assaultKey || "idle", true);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -3644,7 +4434,7 @@
           if (currentFrontline >= 4 && isReserveCandidate && unitEntry.hp > unitEntry.maxHp * 0.65) {
             incrementStrat(owner, "reserves");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}作为桥头预备队待机。`);
-            finalizeUnitState(unitEntry, state, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
+            finalizeUnitState(unitEntry, state2, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -3652,13 +4442,13 @@
         }
         if (isTransportUnit(unitEntry)) {
           if (!unitEntry.cargo.length && autoLoadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state, "transport-load", false);
+            finalizeUnitState(unitEntry, state2, "transport-load", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (unitEntry.cargo.length && autoUnloadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state, "transport-unload", false);
+            finalizeUnitState(unitEntry, state2, "transport-unload", false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -3671,7 +4461,7 @@
             if (unitEntry.cargo.length && (nearThreat === 0 || escortAdjacent)) {
               autoUnloadAdjacent(unitEntry);
             }
-            finalizeUnitState(unitEntry, state, `landing:${cellKey(landing.x, landing.y)}`, moved);
+            finalizeUnitState(unitEntry, state2, `landing:${cellKey(landing.x, landing.y)}`, moved);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -3680,13 +4470,13 @@
         if (unitEntry.type === "engineer") {
           const engineerChoice = engineerBuildChoice(owner, unitEntry, intent);
           if (engineerChoice?.kind === "camp" && buildCamp(unitEntry)) {
-            finalizeUnitState(unitEntry, state, "camp", false);
+            finalizeUnitState(unitEntry, state2, "camp", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (engineerChoice?.cell && engineerLaunch(unitEntry, engineerChoice.kind, engineerChoice.cell, engineerChoice.cargoTypes || [])) {
-            finalizeUnitState(unitEntry, state, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
+            finalizeUnitState(unitEntry, state2, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -3701,7 +4491,7 @@
         if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(game, unitEntry, choice.target)) {
           attack(unitEntry, choice.target);
         }
-        finalizeUnitState(unitEntry, state, objectiveKey, !sameCell(startCell, unitEntry));
+        finalizeUnitState(unitEntry, state2, objectiveKey, !sameCell(startCell, unitEntry));
         refresh();
         await pause(aiStepDelay());
       }
@@ -3710,6 +4500,10 @@
       }
     }
     function newGame() {
+      facilitySystem.clear();
+      statusSystem.clear();
+      decisionSystem.clear();
+      initFactionSystems();
       const aiCount = Number($("aiSelect").value);
       const spectator = $("spectatorSelect")?.value === "on";
       const owners = spectator ? Array.from({ length: aiCount }, (_, index) => `ai${index}`) : ["player", ...Array.from({ length: aiCount }, (_, index) => `ai${index}`)];

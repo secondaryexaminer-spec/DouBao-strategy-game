@@ -31,7 +31,18 @@
 2. **模拟器升级**：直接 import core/ai 模块（替代 eval 打包产物）+ 确定性 RNG + 状态快照 trace
 3. **同步开始**（地基+模拟器差不多后）：增加新兵种 / 改良 AI 算法让 AI 更有策略思维（以冷酷难度为训练基准）
 
+## v0.2 差异化重构（2026-09-06 启动，最高优先级主线）
+- **依据**：项目根 `边境指挥官 v0.2——五大联盟与十五国家差异化重构及实现规格书.md`（62章）+ `v0.2-改造施工图.md`（执行层，改前必读）。
+- **总目标**：从"属性差异"升级为"玩法差异"——每联盟一个 Layer4 核心系统：神罗=工事、金帐=掠袭+游牧营地、威尼斯=贸易网络、马穆鲁克=精锐成长(veterancy)、大明=工程+火力网。机制分4层：L1属性/L2条件/L3行为/L4系统，L4才是联盟身份核心。
+- **实施顺序（严格）**：阶段0审计✅ → **阶段1基础设施（主对话，进行前置）**：core/events.js(EventBus)+status.js(中央时效状态)+structures.js(战场设施)+factions/factionContext.js(依赖注入)+factionRegistry.js；game新增 factionState/statuses/structures 三字段（旧存档容错）；main.js 只在7埋点(beginTurn/advanceTurn/attack前后/removeUnit击杀/captureSite/grantIncome)emit。→ 阶段2五大L4系统（**各开一个附属对话**，顺序A神罗→B金帐→C威尼斯→D马穆鲁克→E大明，前一个集成验收再开下一个）→ 阶段3十五国机制重做 → 阶段4兵种审查+tags → 阶段5数值平衡(最后) → 阶段6 AI对局测试(此时才练AI) → 阶段7 UI/反馈。
+- **架构红线**：不整体重写 main.js 闭包，用 EventBus+依赖注入(factionContext)；factions/ 模块禁依赖 DOM、必须 sim 无头可跑；不搞五套独立资源(统一金币+状态+系统)；阶段5前不许改数值，每阶段 build+sim/suite 回归。
+- **44机制处置**：明细见施工图第四节。关键重构项：普鲁士移动+1→军阵协同；金帐本部骑兵+1→可汗威望动态阈值；蓝帐步兵防+1→伏击阵地；热那亚收入+10%→银行信用借贷；拉古萨商队+5→中立商港；叙利亚异联盟+1→协同射击；巴格达光环→学术指令四态；威尼斯商路乘数削弱改贸易网络；大明溅射并入火力网；马穆鲁克kills×2并入veterancy。7个兵种效果全保留。
+- 附属对话 handoff 规范见施工图第五节（路径/必读/硬约束/验收/回传）。
+
 ## 踩坑与根因（按时间倒序）
+- **2026-09-07 · sim 里 AI 联盟默认全是 hre+austria**：`newGame` 里 `$('ai${i}Faction')?.value || 'hre'`，而 sim/run.js 的 config **没有注入 `ai${i}Faction/Nation`**，elFor shim 返回 `''` → 回退到 `'hre'/'austria'`。含义：所有无头 sim 场景的 AI 实际全是神罗（v0.1.2 起即如此），后续联盟（金帐等）接入后 sim 仍只测神罗路径。**待办：sim/run.js 增加 faction/nation 注入支持**（在开始金帐前做，否则 B/C/D/E 的机制无法在无头环境验证）。
+- **2026-09-07 · HRE 接线后 seed777 零变化的原因**：sim 无 `player` owner → 神罗建造决策不发起（`owner==='player'` 分支）→ 无工事 → 木栅税/阵线/工事效果全不触发；兵种联动在本次对局未改变终局统计。这是"预期内零变化"，不是接线失败（接线已由 __hreDebug 挂载冒烟证明）。
+- **2026-09-07 · suite 耗时翻倍**：HRE 接入后 suite 163.5s（Phase1 约 74~84s）。根因：beforeAttack/afterAttack 钩子每次攻击全单位扫描（hasAdjacentFriendlyInfantry/royalGuardNear/getFacilitiesInRange）。正确性无影响，性能回归待优化（空间索引）。
 - **2026-09-06 · PowerShell 5.1 不支持 &&**：给用户的终端提交命令用了 `git add -A && git commit -m "..." && git push`，用户的 PowerShell 5.1 报"不支持 &&"。**教训：给用户的终端命令一律用 `;` 分隔，不用 `&&`**（用户环境是 Windows PowerShell 5.1，不是 PowerShell 7+）。
 - **2026-09-05 · 抽取边界事故**：重构删除段用字符串锚点（`siteBonus` 定义 → `attack` 定义）定位，未核实区间内是否含其他函数，误删了有副作用的 `removeUnit`，导致 sim 报 `removeUnit is not defined`。教训：**切段删除前先列出区间内全部函数清单，副作用函数（改状态/日志/统计）一律留在 main.js**；错误信息直接指认根因（黑箱协议第 4 步）。
 - **2026-09-05 · 编码事故**：用 PowerShell `Get-Content -Raw` + `Set-Content -Encoding utf8` 改 main.js，导致全部中文变乱码（PS 5.1 默认按 ANSI/GBK 读取 UTF-8 文件）。根因链：PS 读取编码错误 → 乱码 → esbuild 报 Unterminated regular expression。**教训：改含中文的 JS 文件禁止用 PowerShell 文本管道，一律用 Node 脚本或 Read/Edit 工具；git restore 可回滚。**

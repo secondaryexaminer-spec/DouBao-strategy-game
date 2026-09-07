@@ -17,6 +17,13 @@ import { teamOf as teamOfPure, areAllies as areAlliesPure, areEnemies as areEnem
 import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from './core/combat.js';
 import { createRng } from './core/rng.js';
 import { reachable } from './core/movement.js';
+import { eventBus } from './core/events.js';
+import { statusSystem } from './core/status.js';
+import { facilitySystem } from './core/facility.js';
+import { decisionSystem } from './core/decision.js';
+import { createFactionContext } from './factions/factionContext.js';
+import { factionRegistry } from './factions/factionRegistry.js';
+import { hreSystem } from './factions/hre/hreRules.js';
 
 (() => {
   'use strict';
@@ -36,6 +43,31 @@ import { reachable } from './core/movement.js';
   let currentSaveKey = null;
   let toastTimer = null;
   let game = null;
+
+  // —— 联盟系统接线（v0.2 Phase2 / HRE 集成，v1.1）——
+  // 幂等：只在首次调用时构造 context 并注册；newGame 每局开头调用以完成跨局清理。
+  let factionCtx = null;
+  function initFactionSystems() {
+    if (factionCtx) return factionCtx;
+    factionCtx = createFactionContext({
+      gameRef: () => game,
+      getUnit,
+      getSite,
+      typeMeta,
+      terrainMeta: k => TERRAIN[k],
+      ownerFaction,
+      ownerNation,
+      log,
+      addGold: (owner, amount) => { game.goldByOwner[owner] = (game.goldByOwner[owner] || 0) + amount; },
+      spendGold: (owner, amount) => {
+        if ((game.goldByOwner[owner] || 0) < amount) return false;
+        game.goldByOwner[owner] -= amount;
+        return true;
+      },
+    });
+    factionRegistry.register('hre', hreSystem, factionCtx);
+    return factionCtx;
+  }
   let fastSim = false;
   const distFieldCache = new Map();
   const landReachCache = new Map();
@@ -793,6 +825,7 @@ import { reachable } from './core/movement.js';
   }
 
   function removeUnit(unitEntry) {
+    eventBus.emit('unitKilled', { victim: unitEntry, killer: null, reason: 'removeUnit' });
     if (unitEntry.cargo?.length) {
       log(`${typeMeta(unitEntry.type).name}被击沉，船上搭载单位全部损失。`, 'warning');
     }
@@ -807,6 +840,9 @@ import { reachable } from './core/movement.js';
 
   function attack(attacker, defender) {
     const result = previewCombat(game, attacker, defender, { x: attacker.x, y: attacker.y }, false);
+    const atkPayload = { attacker, defender, fromCell: { x: attacker.x, y: attacker.y }, toCell: { x: defender.x, y: defender.y }, result, isCounter: false, cancel: false };
+    eventBus.emit('beforeAttack', atkPayload);
+    if (atkPayload.cancel) return;
     defender.hp -= result.damage;
     defender.lastAttacked = true;
     const atkFaction = attacker.owner === 'player' ? game.settings?.faction : game.aiProfiles?.[attacker.owner]?.faction;
@@ -857,6 +893,7 @@ import { reachable } from './core/movement.js';
         log(`${typeMeta(attacker.type).name}在反击中被击毁。`, 'battle');
       }
     }
+    eventBus.emit('afterAttack', { attacker, defender, result, defenderDead: defender.hp <= 0, attackerDead: attacker.hp <= 0 });
     checkEnd();
   }
 
@@ -907,6 +944,7 @@ import { reachable } from './core/movement.js';
     const oldTier = siteEntry.tier;
     const oldOwner = siteEntry.owner;
     siteEntry.owner = unitEntry.owner;
+    eventBus.emit('siteCaptured', { unit: unitEntry, site: siteEntry, oldOwner });
     // 拉古萨：商队占领据点后该据点收入+5
     if ((unitEntry.type === 'tradeCaravan' || unitEntry.type === 'ragusaCaravan') && !siteEntry._caravanBonus) {
       siteEntry.income += 5;
@@ -955,6 +993,13 @@ import { reachable } from './core/movement.js';
   function moveUnit(unitEntry, x, y) {
     const cost = reachable(game, unitEntry).get(cellKey(x, y));
     if (cost === undefined || unitEntry.hasAttacked) {
+      return false;
+    }
+    // v0.2 Phase2：beforeMove 埋点（契约 §2.2）。在移动生效前发出，联盟系统可
+    // 阻止（payload.cancel）或预扣（如神罗木栅移动税）。无订阅者时零行为变化。
+    const movePayload = { unit: unitEntry, from: { x: unitEntry.x, y: unitEntry.y }, to: { x, y }, cancel: false };
+    eventBus.emit('beforeMove', movePayload);
+    if (movePayload.cancel) {
       return false;
     }
     unitEntry.x = x;
@@ -1092,7 +1137,9 @@ import { reachable } from './core/movement.js';
     if (incNation === 'austria' || incNation === 'egypt') nationIncomeBonus += game.sites.filter(s => s.kind === 'city' && s.owner === owner).length * 2;
     if (incNation === 'genoa') nationIncomeBonus += Math.round(base * 0.1);
     const gain = Math.round(base * (game.settings?.incomeMult || 1) * factionMult) + nationIncomeBonus;
-    game.goldByOwner[owner] += gain;
+    const incomePayload = { owner, amount: gain };
+    eventBus.emit('incomeCalculated', incomePayload);
+    game.goldByOwner[owner] += incomePayload.amount;
     if (gain > 0) {
       log(`${ownerName(owner)}获得 ${gain} 金币收入。`, 'gold');
     }
@@ -1133,6 +1180,7 @@ import { reachable } from './core/movement.js';
         }
       }
     }
+    eventBus.emit('turnStart', { owner, initial });
     for (const unitEntry of game.units.filter(entry => entry.owner === owner)) {
       unitEntry.maxMove = effectiveMove(unitEntry);
       unitEntry.move = unitEntry.maxMove;
@@ -1169,6 +1217,8 @@ import { reachable } from './core/movement.js';
         }
       }
     }
+    const endedOwner = game.ownerOrder[(game.currentIndex - 1 + game.ownerOrder.length) % game.ownerOrder.length];
+    eventBus.emit('turnEnd', { owner: endedOwner });
     beginTurn(game.ownerOrder[game.currentIndex], false);
   }
 
@@ -3228,6 +3278,12 @@ import { reachable } from './core/movement.js';
   }
 
   function newGame() {
+    // v0.2 Phase2（HRE 集成）：跨局清理——新一局必须清掉上一局的设施/状态/未决决策；
+    // 随后接线联盟系统（幂等，仅首次真正注册）。两者都在本局任何事件发出之前完成。
+    facilitySystem.clear();
+    statusSystem.clear();
+    decisionSystem.clear();
+    initFactionSystems();
     const aiCount = Number($('aiSelect').value);
     const spectator = $('spectatorSelect')?.value === 'on';
     const owners = spectator ? Array.from({ length: aiCount }, (_, index) => `ai${index}`) : ['player', ...Array.from({ length: aiCount }, (_, index) => `ai${index}`)];

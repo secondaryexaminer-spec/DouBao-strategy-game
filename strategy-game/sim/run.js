@@ -47,6 +47,10 @@ for (let i = 0; i < aiCount; i++) {
   config[`ai${i}Agg`] = args[`ai${i}Agg`] || agg;
   config[`ai${i}Team`] = args[`ai${i}Team`] || teams[i % teams.length];
   config[`ai${i}Color`] = args[`ai${i}Color`] || colors[i % colors.length];
+  // faction/nation injection (v0.2 sim upgrade): only when explicitly passed.
+  // When absent, elFor returns '' -> newGame falls back to 'hre'/'austria', identical to old behavior.
+  if (args[`ai${i}Faction`]) config[`ai${i}Faction`] = args[`ai${i}Faction`];
+  if (args[`ai${i}Nation`]) config[`ai${i}Nation`] = args[`ai${i}Nation`];
 }
 
 // --- Minimal DOM / canvas shim -------------------------------------------------
