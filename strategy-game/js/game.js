@@ -684,10 +684,10 @@
   var MULTIPLIER = 1664525;
   var INCREMENT = 1013904223;
   function createRng(seed) {
-    let state2 = seed >>> 0;
+    let state4 = seed >>> 0;
     return function rng() {
-      state2 = state2 * MULTIPLIER + INCREMENT >>> 0;
-      return state2 / MODULUS;
+      state4 = state4 * MULTIPLIER + INCREMENT >>> 0;
+      return state4 / MODULUS;
     };
   }
 
@@ -1507,6 +1507,405 @@
     }
   };
 
+  // src/factions/goldenHorde/raiding.js
+  var RAIDED_KEY = "raided";
+  var RAIDED_TURNS = 3;
+  var RAID_LOOT = {
+    normal: 3,
+    // 普通单位击杀
+    elite: 5,
+    // 高等级单位（level>=3）击杀
+    trade: 6,
+    // 商队/运输单位击杀
+    siteBonus: 4,
+    // 袭击据点：击杀站在敌方据点格上的单位
+    raidedMult: 2
+    // 带 raided 标记的单位被击杀 → 战利品翻倍
+  };
+  var RAID_POWER_MOVE_MIN = 5;
+  var RAID_POWER_LEVEL_MIN = 3;
+  var TRADE_TYPES = /* @__PURE__ */ new Set(["tradeCaravan", "ragusaCaravan"]);
+  var state2 = {
+    lastGameRef: null,
+    // 换局检测
+    slowUsedThisTurn: /* @__PURE__ */ new Set()
+    // unitId：本回合已因 raided 预扣过移动力（每 beginTurn 重置）
+  };
+  function resetState2() {
+    state2.slowUsedThisTurn.clear();
+  }
+  function syncGameRef2(ctx) {
+    if (ctx && ctx.game !== state2.lastGameRef) {
+      resetState2();
+      state2.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests2() {
+    resetState2();
+    state2.lastGameRef = null;
+  }
+  function debugState() {
+    return {
+      slowUsedThisTurn: [...state2.slowUsedThisTurn]
+    };
+  }
+  function isGoldenHordeOwner(ctx, owner) {
+    return !!owner && ctx.ownerFaction(owner) === "goldenHorde";
+  }
+  function isGoldenHordeUnit(ctx, unit) {
+    return !!unit && isGoldenHordeOwner(ctx, unit.owner);
+  }
+  function isTradeTarget(ctx, unit) {
+    if (!unit) return false;
+    if (TRADE_TYPES.has(unit.type)) return true;
+    const meta = ctx.typeMeta(unit.type);
+    return !!(meta && meta.transport);
+  }
+  function raidPower(ctx, unit) {
+    const meta = ctx.typeMeta(unit.type);
+    if (!meta) return 0;
+    return (meta.move >= RAID_POWER_MOVE_MIN ? 1 : 0) + (meta.level >= RAID_POWER_LEVEL_MIN ? 1 : 0);
+  }
+  function baseLoot(ctx, defender) {
+    if (isTradeTarget(ctx, defender)) return RAID_LOOT.trade;
+    const meta = ctx.typeMeta(defender.type);
+    if (meta && meta.level >= 3) return RAID_LOOT.elite;
+    return RAID_LOOT.normal;
+  }
+  function siteBonusFor(ctx, attacker, defender) {
+    const site = ctx.getSite(defender.x, defender.y);
+    if (!site) return 0;
+    if (site.owner === "neutral") return 0;
+    if (ctx.areAllies(ctx.game.teams, site.owner, attacker.owner)) return 0;
+    return RAID_LOOT.siteBonus;
+  }
+  function onAfterAttack2(ctx, payload) {
+    const { attacker, defender, defenderDead } = payload || {};
+    if (!attacker || !defender) return;
+    if (!isGoldenHordeUnit(ctx, attacker)) return;
+    if (ctx.areAllies(ctx.game.teams, attacker.owner, defender.owner)) return;
+    if (!defenderDead) {
+      ctx.addStatus(defender.id, RAIDED_KEY, RAIDED_TURNS, { by: attacker.owner });
+      ctx.log(`${ctx.typeMeta(attacker.type).name}掠袭了${ctx.typeMeta(defender.type).name}，使其陷入疲软（raided）。`, "battle");
+      return;
+    }
+    let gold = baseLoot(ctx, defender) + siteBonusFor(ctx, attacker, defender) + raidPower(ctx, attacker);
+    if (ctx.hasStatus(defender.id, RAIDED_KEY)) {
+      gold *= RAID_LOOT.raidedMult;
+    }
+    if (gold > 0) {
+      ctx.addGold(attacker.owner, gold, "raid");
+      ctx.log(`${ctx.typeMeta(attacker.type).name}掠袭成功，缴获 ${gold} 金币。`, "gold");
+    }
+  }
+  function onBeforeMove2(ctx, payload) {
+    const { unit, from, to } = payload || {};
+    if (!unit || !to || !from) return;
+    if (unit.move <= 0) return;
+    if (!ctx.hasStatus(unit.id, RAIDED_KEY)) return;
+    if (state2.slowUsedThisTurn.has(unit.id)) return;
+    const step = ctx.movementCost(ctx.game, unit, to.x, to.y);
+    const stepCost = to.x !== from.x && to.y !== from.y ? step * Math.SQRT2 : step;
+    if (unit.move < stepCost + 1) {
+      payload.cancel = true;
+      return;
+    }
+    unit.move -= 1;
+    state2.slowUsedThisTurn.add(unit.id);
+  }
+  function onTurnStart2(ctx, payload) {
+    syncGameRef2(ctx);
+    state2.slowUsedThisTurn.clear();
+  }
+
+  // src/factions/goldenHorde/nomadCamp.js
+  var NOMAD_CAMP = {
+    type: "nomadCamp",
+    buildCost: 25,
+    // 建造费用
+    duration: 5,
+    // 存在回合数（金帐本部营地+2 为阶段3国家机制，本模块预留 duration 乘区）
+    upkeep: 2,
+    // 每回合维护费
+    maxCamps: 2,
+    // 每方同时存在的游牧营地上限
+    migrateRange: 2,
+    // 迁移候选格：营地切比雪夫距离 <= 2
+    migrateMaxOptions: 8
+    // 迁移候选格最多列出的选项数
+  };
+  var CAMP_PRODUCIBLE = ["lightCavalry", "hordeCavalry", "horseArcher", "nomadArcher", "nomadChariot"];
+  var state3 = {
+    lastGameRef: null
+  };
+  function resetState3() {
+  }
+  function syncGameRef3(ctx) {
+    if (ctx && ctx.game !== state3.lastGameRef) {
+      resetState3();
+      state3.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests3() {
+    resetState3();
+    state3.lastGameRef = null;
+  }
+  function isLandCell2(ctx, x, y) {
+    const g = ctx.game;
+    if (!g || x < 0 || y < 0 || x >= g.w || y >= g.h) return false;
+    const t = g.terrain[y] && g.terrain[y][x];
+    return !!t && t !== "water" && t !== "mountain";
+  }
+  function campCount(ctx, owner) {
+    return ctx.getFacilitiesByType(NOMAD_CAMP.type).filter((f) => f.owner === owner).length;
+  }
+  function myCamps(ctx, owner) {
+    return ctx.getFacilitiesByType(NOMAD_CAMP.type).filter((f) => f.owner === owner);
+  }
+  function canBuildCampAt(ctx, unit) {
+    if (!unit || !isGoldenHordeOwner(ctx, unit.owner)) return false;
+    const meta = ctx.typeMeta(unit.type);
+    if (!meta || meta.domain !== "land") return false;
+    if (unit.acted || unit.hasAttacked) return false;
+    if (!isLandCell2(ctx, unit.x, unit.y)) return false;
+    if (ctx.getSite(unit.x, unit.y)) return false;
+    if (ctx.getFacilityAt(unit.x, unit.y)) return false;
+    if ((ctx.game.goldByOwner[unit.owner] || 0) < NOMAD_CAMP.buildCost) return false;
+    if (campCount(ctx, unit.owner) >= NOMAD_CAMP.maxCamps) return false;
+    return true;
+  }
+  function isValidCampCell(ctx, x, y) {
+    if (!isLandCell2(ctx, x, y)) return false;
+    if (ctx.getSite(x, y)) return false;
+    if (ctx.getFacilityAt(x, y)) return false;
+    if (ctx.getUnit(x, y)) return false;
+    return true;
+  }
+  function requestBuildDecision2(ctx, unit) {
+    if (!canBuildCampAt(ctx, unit)) return null;
+    const options = [
+      { id: "none", label: "不建", description: "保留金币与本回合行动，不建立营地。" },
+      { id: "build", label: "建游牧营地", description: `${NOMAD_CAMP.buildCost}金币，存在${NOMAD_CAMP.duration}回合，每回合${NOMAD_CAMP.upkeep}金币维护。` }
+    ];
+    const owner = unit.owner;
+    const unitId = unit.id;
+    const decisionId = `ghCampBuild_${unitId}`;
+    return ctx.requestDecision(decisionId, {
+      owner,
+      unitId,
+      title: "游牧营地",
+      description: `${ctx.typeMeta(unit.type).name}可在此格建立游牧营地（消耗本回合行动并花费金币）。`,
+      options,
+      onResolve: (choiceId) => {
+        resolveBuild2(ctx, owner, unitId, choiceId);
+      }
+    });
+  }
+  function resolveBuild2(ctx, owner, unitId, choiceId) {
+    if (!choiceId || choiceId === "none") return false;
+    const unit = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit || unit.owner !== owner) return false;
+    if (!canBuildCampAt(ctx, unit)) {
+      ctx.log("营地建造条件不再满足（金币/占位/上限变化）。", "warning");
+      return false;
+    }
+    if (!ctx.spendGold(owner, NOMAD_CAMP.buildCost)) return false;
+    const fac = ctx.createFacility(NOMAD_CAMP.type, owner, unit.x, unit.y, {
+      duration: NOMAD_CAMP.duration,
+      data: { builtTurn: ctx.game.turn }
+    });
+    unit.acted = true;
+    unit.move = 0;
+    unit.hasAttacked = true;
+    ctx.log(`${ctx.typeMeta(unit.type).name}在（${unit.x},${unit.y}）建立了游牧营地，可维持 ${NOMAD_CAMP.duration} 回合。`, "system");
+    return !!fac;
+  }
+  function migrateCandidates(ctx, camp) {
+    const out = [];
+    const r = NOMAD_CAMP.migrateRange;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = camp.x + dx;
+        const y = camp.y + dy;
+        if (!isValidCampCell(ctx, x, y)) continue;
+        out.push({ x, y });
+        if (out.length >= NOMAD_CAMP.migrateMaxOptions) return out;
+      }
+    }
+    return out;
+  }
+  function requestCampDecision(ctx, camp) {
+    if (!camp || camp.type !== NOMAD_CAMP.type) return null;
+    const owner = camp.owner;
+    const options = [{ id: "none", label: "维持营地", description: "本回合不生产、不迁移。" }];
+    const gold = ctx.game.goldByOwner[owner] || 0;
+    const occupant = ctx.getUnit(camp.x, camp.y);
+    if (!occupant) {
+      for (const type of CAMP_PRODUCIBLE) {
+        const meta = ctx.typeMeta(type);
+        if (!meta) continue;
+        if (gold < meta.cost) continue;
+        options.push({ id: `produce:${type}`, label: `生产${meta.name}`, description: `${meta.name}（${meta.cost}金币，立即部署于营地格）` });
+      }
+    }
+    for (const cell of migrateCandidates(ctx, camp)) {
+      options.push({ id: `migrate:${cell.x},${cell.y}`, label: `迁移到（${cell.x},${cell.y}）`, description: "营地迁往目标格，原址失去生产功能。" });
+    }
+    if (options.length <= 1) return null;
+    const decisionId = `ghCamp_${camp.id}`;
+    return ctx.requestDecision(decisionId, {
+      owner,
+      title: "游牧营地行动",
+      description: `游牧营地（${camp.x},${camp.y}）本回合可生产金帐单位或迁移（消耗营地本回合行动）。`,
+      options,
+      onResolve: (choiceId) => {
+        resolveCampAction(ctx, owner, camp.id, choiceId);
+      }
+    });
+  }
+  function resolveCampAction(ctx, owner, campId, choiceId) {
+    if (!choiceId || choiceId === "none") return false;
+    const camp = ctx.getFacilitiesByType(NOMAD_CAMP.type).find((f) => f.id === campId);
+    if (!camp || camp.owner !== owner) return false;
+    if (choiceId.startsWith("produce:")) {
+      return doProduce(ctx, owner, camp, choiceId.slice("produce:".length));
+    }
+    if (choiceId.startsWith("migrate:")) {
+      const parts = choiceId.slice("migrate:".length).split(",");
+      const tx = parseInt(parts[0], 10);
+      const ty = parseInt(parts[1], 10);
+      return doMigrate(ctx, owner, camp, tx, ty);
+    }
+    return false;
+  }
+  function doProduce(ctx, owner, camp, type) {
+    const meta = ctx.typeMeta(type);
+    if (!meta || !CAMP_PRODUCIBLE.includes(type)) return false;
+    if (ctx.getUnit(camp.x, camp.y)) {
+      ctx.log("营地格已被占用，无法生产。", "warning");
+      return false;
+    }
+    const cost = meta.cost;
+    if (!ctx.spendGold(owner, cost)) {
+      ctx.log("金币不足，无法生产。", "warning");
+      return false;
+    }
+    const unitEntry = ctx.createUnit(type, owner, camp.x, camp.y);
+    ctx.events.emit("productionCompleted", { owner, unit: unitEntry, site: camp, kind: "unit" });
+    ctx.log(`游牧营地（${camp.x},${camp.y}）生产了${meta.name}。`, "system");
+    return true;
+  }
+  function doMigrate(ctx, owner, camp, tx, ty) {
+    if (!isValidCampCell(ctx, tx, ty)) {
+      ctx.log("目标格不再适合营地（占位/地形变化）。", "warning");
+      return false;
+    }
+    if (ctx.diagonalDist(camp, { x: tx, y: ty }) > NOMAD_CAMP.migrateRange) {
+      ctx.log("目标格超出营地迁移范围。", "warning");
+      return false;
+    }
+    const data = { ...camp.data || {}, migrated: (camp.data?.migrated || 0) + 1 };
+    ctx.removeFacility(camp.id);
+    ctx.createFacility(NOMAD_CAMP.type, owner, tx, ty, { duration: camp.duration, data });
+    ctx.log(`游牧营地迁移到（${tx},${ty}），原址失去生产功能。`, "system");
+    return true;
+  }
+  function onTurnStart3(ctx, payload) {
+    syncGameRef3(ctx);
+    const owner = payload && payload.owner;
+    const initial = !!(payload && payload.initial);
+    if (!isGoldenHordeOwner(ctx, owner)) return;
+    ctx.expireFacilities(owner);
+    if (!initial) {
+      for (const camp of myCamps(ctx, owner)) {
+        if (!ctx.spendGold(owner, NOMAD_CAMP.upkeep)) {
+          ctx.removeFacility(camp.id);
+          ctx.log("游牧营地因无力支付维护而解散。", "warning");
+        }
+      }
+    }
+    if (owner === "player") {
+      for (const unit of ctx.game.units) {
+        if (unit.owner === owner && canBuildCampAt(ctx, unit)) {
+          requestBuildDecision2(ctx, unit);
+        }
+      }
+      for (const camp of myCamps(ctx, owner)) {
+        requestCampDecision(ctx, camp);
+      }
+    }
+  }
+
+  // src/factions/goldenHorde/goldenHordeRules.js
+  var goldenHordeSystem = {
+    id: "goldenHorde",
+    // 注册时调用一次：挂载 debug/test 入口（globalThis.__goldenHordeDebug，浏览器控制台可用）
+    init(ctx) {
+      attachDebug2(ctx);
+    },
+    // turnStart：先无条件重置掠袭去重标记（raided 作用于被打方，所有 owner 回合都要清），
+    // 再处理营地过期/维护/决策（内部判断金帐 owner）。
+    onTurnStart(ctx, payload) {
+      onTurnStart2(ctx, payload);
+      onTurnStart3(ctx, payload);
+    },
+    // beforeMove：raided 移动力 -1（预扣；付不起则 cancel）
+    onBeforeMove(ctx, payload) {
+      onBeforeMove2(ctx, payload);
+    },
+    // afterAttack：掠袭收益（击杀战利品）+ raided 标记（未击杀）
+    onAfterAttack(ctx, payload) {
+      onAfterAttack2(ctx, payload);
+    },
+    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
+    reset() {
+      resetForTests2();
+      resetForTests3();
+    }
+  };
+  function attachDebug2(ctx) {
+    const debug = {
+      config: () => ({
+        raidLoot: { ...RAID_LOOT },
+        raidPower: { moveMin: RAID_POWER_MOVE_MIN, levelMin: RAID_POWER_LEVEL_MIN, raidedTurns: RAIDED_TURNS },
+        camp: { ...NOMAD_CAMP },
+        producible: [...CAMP_PRODUCIBLE]
+      }),
+      // 当前所有游牧营地
+      camps: () => ctx.getFacilitiesByType(NOMAD_CAMP.type).map((f) => ({
+        id: f.id,
+        owner: f.owner,
+        x: f.x,
+        y: f.y,
+        duration: f.duration,
+        data: f.data,
+        occupant: ctx.getUnit(f.x, f.y) ? ctx.getUnit(f.x, f.y).type : null
+      })),
+      // 当前所有带 raided 标记的单位
+      raided: () => ctx.game.units.filter((u) => ctx.hasStatus(u.id, RAIDED_KEY)).map((u) => ({ id: u.id, type: u.type, owner: u.owner, x: u.x, y: u.y })),
+      state: () => ({ ...debugState() }),
+      // 查看某 owner 可建营地的单位
+      eligible: (owner) => ctx.game.units.filter((u) => u.owner === owner && canBuildCampAt(ctx, u)).map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y })),
+      // 为某 owner 所有可建单位发起建造决策；为所有营地发起行动决策（返回请求数）
+      requestForOwner: (owner) => {
+        let n = 0;
+        for (const u of ctx.game.units) {
+          if (u.owner === owner && requestBuildDecision2(ctx, u)) n += 1;
+        }
+        for (const c of myCamps(ctx, owner)) {
+          if (requestCampDecision(ctx, c)) n += 1;
+        }
+        return n;
+      },
+      // 查看未决金帐决策（浏览器 UI 阶段前的手动测试入口）
+      pending: () => ctx.getPendingDecisions("player").filter((r) => String(r.id || "").startsWith("ghCamp")).map((r) => ({ id: r.id, title: r.context.title, options: r.context.options.map((o) => o.id) })),
+      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId)
+    };
+    if (typeof globalThis !== "undefined") globalThis.__goldenHordeDebug = debug;
+    return debug;
+  }
+
   // src/main.js
   (() => {
     "use strict";
@@ -1555,6 +1954,7 @@
         }
       });
       factionRegistry.register("hre", hreSystem, factionCtx);
+      factionRegistry.register("goldenHorde", goldenHordeSystem, factionCtx);
       return factionCtx;
     }
     let fastSim = false;
@@ -2085,7 +2485,7 @@
     function atUnitCap(owner, domain) {
       return ownedUnitCount(owner, domain) >= unitCapFor(domain);
     }
-    function campCount(owner) {
+    function campCount2(owner) {
       return game.sites.filter((entry) => entry.kind === "camp" && entry.owner === owner).length;
     }
     function unitBuildCost(unitEntry) {
@@ -2911,14 +3311,14 @@
       return adjacent82(unitEntry.x, unitEntry.y).filter((cell) => isWaterTile(cell.x, cell.y) && !getUnit2(cell.x, cell.y));
     }
     function canBuildCamp(unitEntry) {
-      return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && isLandTile(unitEntry.x, unitEntry.y) && !getSite2(unitEntry.x, unitEntry.y) && game.goldByOwner[unitEntry.owner] >= CAMP_COST && campCount(unitEntry.owner) < MAX_CAMPS_PER_SIDE;
+      return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && isLandTile(unitEntry.x, unitEntry.y) && !getSite2(unitEntry.x, unitEntry.y) && game.goldByOwner[unitEntry.owner] >= CAMP_COST && campCount2(unitEntry.owner) < MAX_CAMPS_PER_SIDE;
     }
     function canEngineerLaunch(unitEntry, type, cell, cargoTypes = []) {
       const totalCost = factionAdjustedCost(unitEntry.owner, type, cargoTypes);
       return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && !!cell && diagonalDist(unitEntry, cell) === 1 && isWaterTile(cell.x, cell.y) && !getUnit2(cell.x, cell.y) && game.goldByOwner[unitEntry.owner] >= totalCost;
     }
     function buildCamp(unitEntry) {
-      if (!canBuildCamp(unitEntry) || campCount(unitEntry.owner) >= MAX_CAMPS_PER_SIDE) {
+      if (!canBuildCamp(unitEntry) || campCount2(unitEntry.owner) >= MAX_CAMPS_PER_SIDE) {
         return false;
       }
       game.goldByOwner[unitEntry.owner] -= CAMP_COST;
@@ -3728,7 +4128,7 @@
     }
     function bestObjective(owner, unitEntry, intent = null) {
       const defaultAgg = AGG[game.aiProfiles?.[owner]?.agg || "balanced"] || AGG.balanced;
-      const state2 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
+      const state4 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
       const memory = frontMemory(owner);
       const isSea = typeMeta(unitEntry.type).domain === "sea";
       const pool = isSea ? [intent?.navalSite, intent?.assaultSite, intent?.expansionSite, ...intent?.alternateSites || []] : [intent?.expansionSite, intent?.assaultSite, ...intent?.alternateSites || []];
@@ -3745,7 +4145,7 @@
         if (strategicSiteValue(siteEntry, owner, unitEntry) <= 0) {
           return;
         }
-        if (state2.rerouteTurns > 0 && state2.failedObjectiveKey === `site:${key}`) {
+        if (state4.rerouteTurns > 0 && state4.failedObjectiveKey === `site:${key}`) {
           return;
         }
         if (memory[`site:${key}`]?.cooldown > 0) {
@@ -3878,9 +4278,9 @@
       }
       return distances;
     }
-    function finalizeUnitState(unitEntry, state2, objectiveKey, movedThisTurn) {
-      const stalledTurns = movedThisTurn ? 0 : state2.stalledTurns + 1;
-      const rerouteTurns = movedThisTurn ? Math.max(0, state2.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state2.rerouteTurns - 1);
+    function finalizeUnitState(unitEntry, state4, objectiveKey, movedThisTurn) {
+      const stalledTurns = movedThisTurn ? 0 : state4.stalledTurns + 1;
+      const rerouteTurns = movedThisTurn ? Math.max(0, state4.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state4.rerouteTurns - 1);
       rememberFrontOutcome(unitEntry.owner, objectiveKey, movedThisTurn);
       if (!movedThisTurn && stalledTurns >= 2 && objectiveKey.startsWith("site:")) {
         const siteId = objectiveKey.slice(5);
@@ -3891,7 +4291,7 @@
         lastPosition: { x: unitEntry.x, y: unitEntry.y },
         stalledTurns,
         rerouteTurns,
-        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state2.failedObjectiveKey
+        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state4.failedObjectiveKey
       };
     }
     function targetValue(unitEntry) {
@@ -3974,7 +4374,7 @@
     function chooseAction(owner, unitEntry, profile, intent = null) {
       const diffCfg = DIFF[profile.diff];
       const aggCfg = AGG[profile.agg];
-      const state2 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
+      const state4 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
       const cells = [...reachable(game, unitEntry).entries()].map(([key, cost]) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y, cost };
@@ -3993,13 +4393,13 @@
         const moveScore = objective ? (currentPath - nextPath) * 2.9 * diffCfg.lookahead * aggCfg.push : 0;
         const supportScore = friendSupport(owner, cell.x, cell.y);
         const riskPenalty = enemyThreat(owner, cell.x, cell.y) * diffCfg.risk * aggCfg.preserve * 0.9;
-        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state2.stalledTurns * 0.7);
+        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state4.stalledTurns * 0.7);
         const siteEntry = getSite2(cell.x, cell.y);
         const captureScore = siteEntry ? strategicSiteValue(siteEntry, owner, unitEntry) + cityEconomyValue(siteEntry, owner) : 0;
         const intentBonus = intent?.assaultSite ? Math.max(0, dist(unitEntry, intent.assaultSite) - dist(cell, intent.assaultSite)) * 1.4 * assaultMag : 0;
         const expansionBonus = intent?.expansionSite ? Math.max(0, dist(unitEntry, intent.expansionSite) - dist(cell, intent.expansionSite)) * 1.9 * aggCfg.expansion * expansionMag : 0;
         const futureCityPressure = objective ? Math.max(0, futureReach(unitEntry, diffCfg.lookahead) - dist(cell, objective)) * 0.35 : 0;
-        const rerouteBonus = state2.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
+        const rerouteBonus = state4.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
         const terrainBonus = game.terrain[cell.y][cell.x] === "forest" ? 3 * aggCfg.forestBias : 0;
         const roleBonus = unitRoleCellBonus(owner, unitEntry, cell, intent);
         const base = moveScore + supportScore + captureScore + intentBonus + expansionBonus + futureCityPressure + rerouteBonus + terrainBonus + roleBonus - riskPenalty - congestionPenalty;
@@ -4199,7 +4599,7 @@
       const nearFront = nearestEnemyCity && dist(engineer, nearestEnemyCity) <= 6 || game.units.some((unitEntry) => areEnemies2(unitEntry.owner, owner) && dist(unitEntry, engineer) <= 5);
       const safeEnough = enemyThreat(owner, engineer.x, engineer.y) < typeMeta("engineer").hp * 0.6;
       const canAffordForwardBase = game.goldByOwner[owner] >= CAMP_COST + typeMeta("swordsman").cost;
-      const needsCamp = landFrontExists && !getSite2(engineer.x, engineer.y) && campCount(owner) < MAX_CAMPS_PER_SIDE && canAffordForwardBase && nearFront && safeEnough && !atUnitCap(owner, "land");
+      const needsCamp = landFrontExists && !getSite2(engineer.x, engineer.y) && campCount2(owner) < MAX_CAMPS_PER_SIDE && canAffordForwardBase && nearFront && safeEnough && !atUnitCap(owner, "land");
       if (needsCamp && canBuildCamp(engineer)) {
         return { kind: "camp" };
       }
@@ -4427,18 +4827,18 @@
         if (!game.units.includes(unitEntry)) {
           continue;
         }
-        const state2 = computeUnitState(unitEntry);
+        const state4 = computeUnitState(unitEntry);
         const startCell = { x: unitEntry.x, y: unitEntry.y };
         const assaultKey = intent.assaultSite ? `site:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}` : null;
         const bridgeheadCooldown = assaultKey ? memory[assaultKey]?.cooldown > 0 : false;
-        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state2.rerouteTurns > 0 && state2.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
+        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state4.rerouteTurns > 0 && state4.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
         if (bridgeheadBlocked && typeMeta(unitEntry.type).domain === "land" && profile.agg !== "reckless") {
           const retreatCell = bestRetreatCell(owner, unitEntry, intent.assaultSite);
           if (retreatCell && (retreatCell.x !== unitEntry.x || retreatCell.y !== unitEntry.y)) {
             incrementStrat(owner, "retreats");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}从桥头暂退，在 ${intent.assaultSite.name} 方向重整。`);
             moveUnit(unitEntry, retreatCell.x, retreatCell.y);
-            finalizeUnitState(unitEntry, state2, assaultKey || "idle", true);
+            finalizeUnitState(unitEntry, state4, assaultKey || "idle", true);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4450,7 +4850,7 @@
           if (currentFrontline >= 4 && isReserveCandidate && unitEntry.hp > unitEntry.maxHp * 0.65) {
             incrementStrat(owner, "reserves");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}作为桥头预备队待机。`);
-            finalizeUnitState(unitEntry, state2, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
+            finalizeUnitState(unitEntry, state4, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4458,13 +4858,13 @@
         }
         if (isTransportUnit(unitEntry)) {
           if (!unitEntry.cargo.length && autoLoadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state2, "transport-load", false);
+            finalizeUnitState(unitEntry, state4, "transport-load", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (unitEntry.cargo.length && autoUnloadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state2, "transport-unload", false);
+            finalizeUnitState(unitEntry, state4, "transport-unload", false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4477,7 +4877,7 @@
             if (unitEntry.cargo.length && (nearThreat === 0 || escortAdjacent)) {
               autoUnloadAdjacent(unitEntry);
             }
-            finalizeUnitState(unitEntry, state2, `landing:${cellKey(landing.x, landing.y)}`, moved);
+            finalizeUnitState(unitEntry, state4, `landing:${cellKey(landing.x, landing.y)}`, moved);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4486,13 +4886,13 @@
         if (unitEntry.type === "engineer") {
           const engineerChoice = engineerBuildChoice(owner, unitEntry, intent);
           if (engineerChoice?.kind === "camp" && buildCamp(unitEntry)) {
-            finalizeUnitState(unitEntry, state2, "camp", false);
+            finalizeUnitState(unitEntry, state4, "camp", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (engineerChoice?.cell && engineerLaunch(unitEntry, engineerChoice.kind, engineerChoice.cell, engineerChoice.cargoTypes || [])) {
-            finalizeUnitState(unitEntry, state2, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
+            finalizeUnitState(unitEntry, state4, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -4507,7 +4907,7 @@
         if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(game, unitEntry, choice.target)) {
           attack(unitEntry, choice.target);
         }
-        finalizeUnitState(unitEntry, state2, objectiveKey, !sameCell(startCell, unitEntry));
+        finalizeUnitState(unitEntry, state4, objectiveKey, !sameCell(startCell, unitEntry));
         refresh();
         await pause(aiStepDelay());
       }

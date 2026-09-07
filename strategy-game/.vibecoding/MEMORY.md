@@ -40,6 +40,8 @@
 - 附属对话 handoff 规范见施工图第五节（路径/必读/硬约束/验收/回传）。
 
 ## 踩坑与根因（按时间倒序）
+- **2026-09-07 · 金帐接线后默认局零变化、金帐局有差异**：注册 `goldenHorde` 后，默认 hre 局（isGoldenHordeOwner=false）所有钩子空转 → seed777 逐项与基线一致；金帐镜像局统计变化（engineerLandings 5→17、transportLaunches 10→23、sells 65→50）证明掠袭经济真实生效——**接线验证的判定标准：默认局必须零变化，注入局必须有可解释差异**。
+- **2026-09-07 · 金帐模块级跨局状态靠 syncGameRef 自动清**：`state.slowUsedThisTurn` 是模块级 Set，不是 game 状态；raiding.onTurnStart 每回合对比 `ctx.game` 引用，换局自动 reset——无需在 newGame 额外接线（与 HRE 用 facility 存储不同）。
 - **2026-09-07 · tickStatuses 只传 owner 会误删其他方状态**：status.js 的 `tickStatuses(aliveUnitIds)` 对"不在列表者"执行**删除**（status.js:39-41）。若只传当前 owner 存活单位，其他 owner 存活单位的状态（如敌方单位的 raided）会在该方回合被误删，金帐"下轮攻击额外收益"永远失效。**必须传全量**：`tickStatuses(game.units.map(u => u.id))`（main.js beginTurn 开头、if(!initial) 前、早于 turnStart emit）。
 - **2026-09-07 · raided 写 turns=3 而非 2**：在"每 beginTurn 全量 tick 一次"语义下，turns=2 会在金帐下轮攻击前被清 0（额外收益失效）；turns=3 才能保证：敌方回合 tick→2（移动-1 覆盖敌方恰好 1 个完整回合）→ 金帐下轮 tick→1（攻击时额外收益生效）→ 再下轮归零。玩家可见"持续1回合"= 敌方 1 个完整回合。
 - **2026-09-07 · ctx.createUnit 必须经 main.js deps 注入**：单位工厂 `unit()`/`randomId()` 在 main.js 闭包内，factionContext.js 无法 import——由 initFactionSystems deps 注入 `createUnit(type,owner,x,y)`（复用 unit() 工厂 + push + incrementStat('produced')），ctx 只转发。unitCreated 未埋（main.js 全部生产路径统一排期补，不在 createUnit 半埋）。

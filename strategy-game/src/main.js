@@ -24,6 +24,7 @@ import { decisionSystem } from './core/decision.js';
 import { createFactionContext } from './factions/factionContext.js';
 import { factionRegistry } from './factions/factionRegistry.js';
 import { hreSystem } from './factions/hre/hreRules.js';
+import { goldenHordeSystem } from './factions/goldenHorde/goldenHordeRules.js';
 
 (() => {
   'use strict';
@@ -75,6 +76,7 @@ import { hreSystem } from './factions/hre/hreRules.js';
       },
     });
     factionRegistry.register('hre', hreSystem, factionCtx);
+    factionRegistry.register('goldenHorde', goldenHordeSystem, factionCtx);
     return factionCtx;
   }
   let fastSim = false;
