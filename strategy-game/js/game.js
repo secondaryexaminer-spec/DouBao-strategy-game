@@ -684,10 +684,10 @@
   var MULTIPLIER = 1664525;
   var INCREMENT = 1013904223;
   function createRng(seed) {
-    let state6 = seed >>> 0;
+    let state9 = seed >>> 0;
     return function rng() {
-      state6 = state6 * MULTIPLIER + INCREMENT >>> 0;
-      return state6 / MODULUS;
+      state9 = state9 * MULTIPLIER + INCREMENT >>> 0;
+      return state9 / MODULUS;
     };
   }
 
@@ -3074,6 +3074,537 @@
     }
   };
 
+  // src/factions/ming/fireZone.js
+  var FIREZONE = {
+    type: "fireZone",
+    // facility type 字符串（core 不枚举，联盟系统定义）
+    duration: 1,
+    // 持续 1 回合
+    damage: 2,
+    // 进入伤害（不致死，最低保留 1 HP）
+    crossfireBonus: 4,
+    // ≥2 个火力区覆盖 → 受击伤害 +4（"大幅降低防御"）
+    crossfireMin: 2,
+    // 触发 crossfire 所需的最小火力区数
+    watchtowerRange: 2,
+    // 瞭望塔校正范围（Chebyshev）
+    watchtowerFzBonus: 1,
+    // 瞭望塔范围内 fireZone 进入伤害 +1（2→3）
+    watchtowerXfBonus: 1
+    // 瞭望塔范围内 crossfire 加成 +1（4→5）
+  };
+  var state6 = {
+    lastGameRef: null
+    // 换局检测
+  };
+  function resetState6() {
+  }
+  function syncGameRef6(ctx) {
+    if (ctx && ctx.game !== state6.lastGameRef) {
+      resetState6();
+      state6.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests6() {
+    resetState6();
+    state6.lastGameRef = null;
+  }
+  function isMingOwner(ctx, owner) {
+    return !!owner && ctx.ownerFaction(owner) === "ming";
+  }
+  function isMingRemoteUnit(ctx, unit) {
+    if (!unit) return false;
+    if (!isMingOwner(ctx, unit.owner)) return false;
+    const meta = ctx.typeMeta(unit.type);
+    return !!meta && meta.range > 1;
+  }
+  function inRange(a, b, range) {
+    return Math.abs(a.x - b.x) <= range && Math.abs(a.y - b.y) <= range;
+  }
+  function fireZonesAt(ctx, x, y) {
+    return ctx.getFacilitiesByType(FIREZONE.type).filter((f) => f.x === x && f.y === y);
+  }
+  function watchtowerCovers(ctx, x, y) {
+    return ctx.getFacilitiesByType("watchtower").some((f) => isMingOwner(ctx, f.owner) && inRange(f, { x, y }, FIREZONE.watchtowerRange));
+  }
+  function entryDamageAt(ctx, unit, x, y) {
+    let best = 0;
+    for (const fz of fireZonesAt(ctx, x, y)) {
+      if (ctx.areAllies(ctx.game.teams, unit.owner, fz.owner)) continue;
+      let dmg = FIREZONE.damage;
+      if (watchtowerCovers(ctx, fz.x, fz.y)) dmg += FIREZONE.watchtowerFzBonus;
+      if (dmg > best) best = dmg;
+    }
+    return best;
+  }
+  function crossfireBonusAt(ctx, unit, x, y) {
+    const hostile = fireZonesAt(ctx, x, y).filter((fz) => !ctx.areAllies(ctx.game.teams, unit.owner, fz.owner));
+    if (hostile.length < FIREZONE.crossfireMin) return 0;
+    let bonus = FIREZONE.crossfireBonus;
+    if (watchtowerCovers(ctx, x, y)) bonus += FIREZONE.watchtowerXfBonus;
+    return bonus;
+  }
+  function onAfterAttack5(ctx, payload) {
+    const { attacker, defender } = payload || {};
+    if (!attacker || !defender) return;
+    syncGameRef6(ctx);
+    if (!isMingRemoteUnit(ctx, attacker)) return;
+    if (ctx.areAllies(ctx.game.teams, attacker.owner, defender.owner)) return;
+    const dup = fireZonesAt(ctx, defender.x, defender.y).some((f) => f.data.sourceUnitId === attacker.id);
+    if (dup) return;
+    ctx.createFacility(FIREZONE.type, attacker.owner, defender.x, defender.y, {
+      hp: 1,
+      duration: FIREZONE.duration,
+      data: {
+        owner: attacker.owner,
+        sourceUnitId: attacker.id,
+        x: defender.x,
+        y: defender.y,
+        damage: FIREZONE.damage,
+        type: "fire"
+      }
+    });
+    ctx.log(`${ctx.typeMeta(attacker.type).name}在（${defender.x},${defender.y}）布下火力区，敌军进入将遭到火力打击。`, "battle");
+  }
+  function onBeforeMove5(ctx, payload) {
+    const { unit, to } = payload || {};
+    if (!unit || !to) return;
+    if (unit.move <= 0) return;
+    syncGameRef6(ctx);
+    const dmg = entryDamageAt(ctx, unit, to.x, to.y);
+    if (dmg <= 0) return;
+    unit.hp = Math.max(1, unit.hp - dmg);
+    ctx.log(`${ctx.typeMeta(unit.type).name}闯入火力区，受到 ${dmg} 点火力打击（剩余 ${unit.hp} HP）。`, "battle");
+  }
+  function onBeforeAttack3(ctx, payload) {
+    const { defender, result } = payload || {};
+    if (!defender || !result || !result.damage) return;
+    syncGameRef6(ctx);
+    const bonus = crossfireBonusAt(ctx, defender, defender.x, defender.y);
+    if (bonus <= 0) return;
+    result.damage += bonus;
+    ctx.log(`${ctx.typeMeta(defender.type).name}陷入交叉火力（${crossfireCoverCount(ctx, defender)} 个火力区），防御被压制，受击伤害 +${bonus}。`, "battle");
+  }
+  function crossfireCoverCount(ctx, defender) {
+    return fireZonesAt(ctx, defender.x, defender.y).filter((fz) => !ctx.areAllies(ctx.game.teams, defender.owner, fz.owner)).length;
+  }
+  function onTurnStart6(ctx, payload) {
+    const owner = payload && payload.owner;
+    syncGameRef6(ctx);
+    if (!isMingOwner(ctx, owner)) return;
+    ctx.expireFacilities(owner);
+  }
+  function attachDebug5(ctx) {
+    const debug = {
+      config: () => ({ ...FIREZONE }),
+      zones: () => ctx.getFacilitiesByType(FIREZONE.type).map((f) => ({ id: f.id, owner: f.owner, sourceUnitId: f.data.sourceUnitId, x: f.x, y: f.y, damage: f.data.damage, duration: f.duration })),
+      entryDamage: (unit, x, y) => entryDamageAt(ctx, unit, x, y),
+      crossfire: (unit, x, y) => crossfireBonusAt(ctx, unit, x, y)
+    };
+    if (typeof globalThis !== "undefined") globalThis.__mingDebug = { ...globalThis.__mingDebug || {}, fireZone: debug };
+    return debug;
+  }
+
+  // src/factions/ming/engineering.js
+  var ENGINEERING = {
+    turret: {
+      id: "turret",
+      label: "炮台",
+      cost: 20,
+      hp: 10,
+      duration: null,
+      range: 2,
+      atk: 2,
+      def: 1,
+      desc: "每回合对范围内敌方单位造成 2 点火力打击；范围内己方单位被攻击时伤害 -1"
+    },
+    watchtower: {
+      id: "watchtower",
+      label: "瞭望塔",
+      cost: 14,
+      hp: 6,
+      duration: null,
+      range: 2,
+      desc: "范围内火力区进入伤害 +1、交叉火力加成 +1（视野效果降级，见已知问题）"
+    },
+    supplyDepot: {
+      id: "supplyDepot",
+      label: "补给站",
+      cost: 18,
+      hp: 8,
+      duration: null,
+      range: 2,
+      heal: 2,
+      desc: "每回合为范围内己方单位回复 2 点生命"
+    },
+    mingTrench: {
+      id: "mingTrench",
+      label: "壕沟",
+      cost: 16,
+      hp: 12,
+      duration: null,
+      desc: "壕沟上的单位免受冲锋加成（最多减免 2 点）"
+    },
+    causeway: {
+      id: "causeway",
+      label: "栈桥工事",
+      cost: 12,
+      hp: 10,
+      duration: null,
+      range: 1,
+      def: 1,
+      desc: "桥格及相邻格己方单位被攻击时伤害 -1（临时桥降级版，不改移动成本）"
+    }
+  };
+  var state7 = {
+    lastGameRef: null,
+    // 换局检测
+    deployedThisTurn: /* @__PURE__ */ new Set()
+    // unitId：本回合已请求过部署决策（去重）
+  };
+  function resetState7() {
+    state7.deployedThisTurn.clear();
+  }
+  function syncGameRef7(ctx) {
+    if (ctx && ctx.game !== state7.lastGameRef) {
+      resetState7();
+      state7.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests7() {
+    resetState7();
+    state7.lastGameRef = null;
+  }
+  function isMingOwner2(ctx, owner) {
+    return !!owner && ctx.ownerFaction(owner) === "ming";
+  }
+  function isEngineerUnit(ctx, unit) {
+    return !!unit && isMingOwner2(ctx, unit.owner) && unit.type === "worksEngineer";
+  }
+  function inRange2(a, b, range) {
+    return Math.abs(a.x - b.x) <= range && Math.abs(a.y - b.y) <= range;
+  }
+  function isLandCell3(ctx, x, y) {
+    const g = ctx.game;
+    if (!g || x < 0 || y < 0 || x >= g.w || y >= g.h) return false;
+    const t = g.terrain[y] && g.terrain[y][x];
+    return !!t && t !== "water" && t !== "mountain";
+  }
+  function canBuildAt2(ctx, unit, type) {
+    const def = ENGINEERING[type];
+    if (!def) return false;
+    if (!isEngineerUnit(ctx, unit)) return false;
+    if (!isLandCell3(ctx, unit.x, unit.y)) return false;
+    if (ctx.getSite(unit.x, unit.y)) return false;
+    const existing = ctx.getFacilityAt(unit.x, unit.y);
+    if (existing && existing.type !== "fireZone") return false;
+    if ((ctx.game.goldByOwner[unit.owner] || 0) < def.cost) return false;
+    return true;
+  }
+  function deployOptionsFor(ctx, unit) {
+    const options = [{ id: "none", label: "不建", description: "保留金币与本回合行动，不部署设施。" }];
+    if (!isEngineerUnit(ctx, unit)) return options;
+    const gold = ctx.game.goldByOwner[unit.owner] || 0;
+    for (const key of ["turret", "watchtower", "supplyDepot", "mingTrench", "causeway"]) {
+      const d = ENGINEERING[key];
+      if (gold >= d.cost) {
+        options.push({ id: d.id, label: `部署${d.label}`, description: `${d.desc}（${d.cost}金币，${d.duration == null ? "持久" : d.duration + "回合"}）` });
+      }
+    }
+    return options;
+  }
+  function requestDeployDecision(ctx, unit) {
+    if (!unit || !isEngineerUnit(ctx, unit)) return null;
+    if (state7.deployedThisTurn.has(unit.id)) return null;
+    if (!isLandCell3(ctx, unit.x, unit.y)) return null;
+    if (ctx.getSite(unit.x, unit.y)) return null;
+    const existing = ctx.getFacilityAt(unit.x, unit.y);
+    if (existing && existing.type !== "fireZone") return null;
+    if ((ctx.game.goldByOwner[unit.owner] || 0) < ENGINEERING.turret.cost) return null;
+    const options = deployOptionsFor(ctx, unit);
+    if (options.length <= 1) return null;
+    state7.deployedThisTurn.add(unit.id);
+    const owner = unit.owner;
+    const unitId = unit.id;
+    const decisionId = `mgEng_${unitId}`;
+    return ctx.requestDecision(decisionId, {
+      owner,
+      unitId,
+      title: "工程部署",
+      description: `${ctx.typeMeta(unit.type).name}可在此格部署工程设施（消耗本回合行动并花费金币）。`,
+      options,
+      onResolve: (choiceId) => {
+        resolveDeploy(ctx, owner, unitId, choiceId);
+      }
+    });
+  }
+  function resolveDeploy(ctx, owner, unitId, choiceId) {
+    const unit = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit || unit.owner !== owner) return false;
+    if (!choiceId || choiceId === "none") return false;
+    const def = ENGINEERING[choiceId];
+    if (!def) return false;
+    if (!canBuildAt2(ctx, unit, choiceId)) {
+      ctx.log(`${ctx.typeMeta(unit.type).name}无法在此格部署${def.label}（条件不再满足）。`, "warning");
+      return false;
+    }
+    if (!ctx.spendGold(owner, def.cost)) return false;
+    ctx.createFacility(choiceId, owner, unit.x, unit.y, { hp: def.hp, duration: def.duration });
+    unit.acted = true;
+    unit.move = 0;
+    unit.hasAttacked = true;
+    ctx.log(`${ctx.typeMeta(unit.type).name}在（${unit.x},${unit.y}）部署了${def.label}。`, "system");
+    return true;
+  }
+  var FACILITY_CHIP_RATIO2 = 0.5;
+  function onAfterAttack6(ctx, payload) {
+    const { attacker, defender, result } = payload || {};
+    if (!attacker || !defender || !result) return;
+    if (isMingOwner2(ctx, attacker.owner)) return;
+    const fac = ctx.getFacilityAt(defender.x, defender.y);
+    if (!fac || !isMingOwner2(ctx, fac.owner)) return;
+    if (fac.type === "fireZone") return;
+    if (ctx.areAllies(ctx.game.teams, attacker.owner, fac.owner)) return;
+    const chip = Math.max(1, Math.round((result.damage || 0) * FACILITY_CHIP_RATIO2));
+    const remaining = ctx.damageFacility(fac.id, chip);
+    const label = ENGINEERING[fac.type]?.label || fac.type;
+    if (remaining <= 0) {
+      ctx.log(`${label}在战火中被摧毁。`, "warning");
+    } else {
+      ctx.log(`${label}受到攻击受损（耐久 ${remaining}/${fac.maxHp}）。`, "warning");
+    }
+  }
+  function onTurnStart7(ctx, payload) {
+    const owner = payload && payload.owner;
+    const initial = !!(payload && payload.initial);
+    syncGameRef7(ctx);
+    if (!isMingOwner2(ctx, owner)) return;
+    state7.deployedThisTurn.clear();
+    if (!initial) {
+      const facilities2 = ctx.getFacilitiesByOwner(owner);
+      for (const f of facilities2) {
+        if (f.type !== "turret") continue;
+        const def = ENGINEERING.turret;
+        for (const u of ctx.game.units) {
+          if (u.owner === owner) continue;
+          if (ctx.areAllies(ctx.game.teams, u.owner, owner)) continue;
+          if (!inRange2(u, f, def.range)) continue;
+          if (u.hp <= 1) continue;
+          u.hp = Math.max(1, u.hp - def.atk);
+          ctx.log(`${def.label}轰击${ctx.typeMeta(u.type).name}，造成 ${def.atk} 点伤害（剩余 ${u.hp} HP）。`, "battle");
+        }
+      }
+      for (const f of facilities2) {
+        if (f.type !== "supplyDepot") continue;
+        const def = ENGINEERING.supplyDepot;
+        for (const u of ctx.game.units) {
+          if (u.owner !== owner) continue;
+          if (u.hp >= u.maxHp) continue;
+          if (!inRange2(u, f, def.range)) continue;
+          u.hp = Math.min(u.maxHp, u.hp + def.heal);
+          ctx.log(`${def.label}为${ctx.typeMeta(u.type).name}补给，回复 ${def.heal} 点生命。`, "battle");
+        }
+      }
+    }
+    if (owner === "player") {
+      for (const unit of ctx.game.units) {
+        if (unit.owner !== owner) continue;
+        requestDeployDecision(ctx, unit);
+      }
+    }
+  }
+  function onBeforeAttack4(ctx, payload) {
+    const { attacker, defender, fromCell, toCell, result, isCounter } = payload || {};
+    if (!attacker || !defender || !result || !result.damage) return;
+    syncGameRef7(ctx);
+    const fac = ctx.getFacilityAt(defender.x, defender.y);
+    if (fac && fac.type === "mingTrench" && isMingOwner2(ctx, fac.owner)) {
+      if (isCharging2(ctx, attacker, fromCell, toCell, isCounter, defender)) {
+        const atkMeta = ctx.typeMeta(attacker.type);
+        const chargeVal = (atkMeta.charge || 0) + (ctx.ownerNation(attacker.owner) === "austria" ? 1 : 0);
+        if (chargeVal > 0) {
+          result.damage = Math.max(1, result.damage - Math.min(chargeVal, 2));
+          ctx.log(`${ctx.typeMeta(attacker.type).name}的冲锋被壕沟阻挡，伤害 -${Math.min(chargeVal, 2)}。`, "battle");
+        }
+      }
+    }
+    if (isMingOwner2(ctx, defender.owner)) {
+      const turrets = ctx.getFacilitiesByType("turret").filter((f) => isMingOwner2(ctx, f.owner) && inRange2(defender, f, ENGINEERING.turret.range));
+      if (turrets.length) {
+        result.damage = Math.max(1, result.damage - ENGINEERING.turret.def);
+      }
+      const causeways = ctx.getFacilitiesByType("causeway").filter((f) => isMingOwner2(ctx, f.owner) && inRange2(defender, f, ENGINEERING.causeway.range));
+      if (causeways.length) {
+        result.damage = Math.max(1, result.damage - ENGINEERING.causeway.def);
+      }
+    }
+  }
+  function isCharging2(ctx, attacker, fromCell, toCell, isCounter, defender) {
+    if (isCounter) return false;
+    if (!attacker || attacker.move !== attacker.maxMove) return false;
+    const meta = ctx.typeMeta(attacker.type);
+    if (!meta || !meta.charge) return false;
+    if (defender && defender.type === "pikeSquare") return false;
+    const from = fromCell || { x: attacker.x, y: attacker.y };
+    const to = toCell || { x: attacker.x, y: attacker.y };
+    return ctx.diagonalDist(from, to) === 1;
+  }
+  function attachDebug6(ctx) {
+    const debug = {
+      config: () => ({ ...ENGINEERING }),
+      facilities: () => ctx.getAllFacilities().map((f) => ({ id: f.id, type: f.type, owner: f.owner, x: f.x, y: f.y, hp: f.hp, maxHp: f.maxHp, duration: f.duration, data: f.data })),
+      state: () => ({ deployedThisTurn: [...state7.deployedThisTurn] }),
+      // 为某 owner 所有工部工程师发起部署决策（返回请求数）
+      requestForOwner: (owner) => {
+        let n = 0;
+        for (const u of ctx.game.units) {
+          if (u.owner === owner && requestDeployDecision(ctx, u)) n += 1;
+        }
+        return n;
+      },
+      pending: (owner) => ctx.getPendingDecisions(owner || "player").filter((r) => String(r.id || "").startsWith("mgEng_")).map((r) => ({ id: r.id, unitId: r.context.unitId, options: r.context.options.map((o) => o.id) })),
+      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId)
+    };
+    if (typeof globalThis !== "undefined") globalThis.__mingDebug = { ...globalThis.__mingDebug || {}, engineering: debug };
+    return debug;
+  }
+
+  // src/factions/ming/mingRules.js
+  var NATION_MECHANICS = {
+    joseonShuzhaiReduce: 3,
+    // 水寨：港口/海岸被攻击伤害 -3
+    annamAmbushBonus: 3,
+    // 丛林伏击：森林中每回合首次攻击伤害 +3
+    stealthKey: "hidden"
+    // 锦衣卫 stealth 状态 key（契约 §3.1 预设 key）
+  };
+  var state8 = {
+    lastGameRef: null,
+    // 换局检测
+    annamFirstHit: /* @__PURE__ */ new Set()
+    // unitId：本回合已享受丛林伏击首攻（每回合重置）
+  };
+  function resetState8() {
+    state8.annamFirstHit.clear();
+  }
+  function syncGameRef8(ctx) {
+    if (ctx && ctx.game !== state8.lastGameRef) {
+      resetState8();
+      state8.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests8() {
+    resetState8();
+    state8.lastGameRef = null;
+  }
+  function atShuzhai(ctx, defender) {
+    if (!defender) return false;
+    const g = ctx.game;
+    if (!g || !g.terrain) return false;
+    const site = ctx.getSite(defender.x, defender.y);
+    if (site && site.kind === "shipyard" && ctx.areAllies(g.teams, site.owner, defender.owner)) return true;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = defender.x + dx;
+        const y = defender.y + dy;
+        if (x < 0 || y < 0 || x >= g.w || y >= g.h) continue;
+        if (g.terrain[y] && g.terrain[y][x] === "water") return true;
+      }
+    }
+    return false;
+  }
+  function onTurnStart8(ctx, payload) {
+    const owner = payload && payload.owner;
+    syncGameRef8(ctx);
+    state8.annamFirstHit.clear();
+    if (ctx.ownerNation(owner) === "mingCore") {
+      for (const u of ctx.game.units) {
+        if (u.owner !== owner) continue;
+        if (u.type !== "jinyiwei") continue;
+        ctx.addStatus(u.id, NATION_MECHANICS.stealthKey, 1, { by: "mingCore" });
+        ctx.log(`${ctx.typeMeta(u.type).name}进入潜伏状态，不易被侦测。`, "system");
+      }
+    }
+  }
+  function onAfterAttack7(ctx, payload) {
+    const { attacker } = payload || {};
+    if (!attacker) return;
+    syncGameRef8(ctx);
+    if (attacker.type !== "jinyiwei") return;
+    if (ctx.ownerNation(attacker.owner) !== "mingCore") return;
+    ctx.removeStatus(attacker.id, NATION_MECHANICS.stealthKey);
+    ctx.log(`${ctx.typeMeta(attacker.type).name}发起攻击，暴露行踪。`, "warning");
+  }
+  function onBeforeAttack5(ctx, payload) {
+    const { attacker, defender, result } = payload || {};
+    if (!attacker || !defender || !result || !result.damage) return;
+    syncGameRef8(ctx);
+    if (ctx.ownerNation(defender.owner) === "joseon" && atShuzhai(ctx, defender)) {
+      result.damage = Math.max(1, result.damage - NATION_MECHANICS.joseonShuzhaiReduce);
+      ctx.log(`${ctx.typeMeta(defender.type).name}依托水寨防御，受击伤害 -${NATION_MECHANICS.joseonShuzhaiReduce}。`, "battle");
+    }
+    if (ctx.ownerNation(attacker.owner) === "annam") {
+      const meta = ctx.typeMeta(attacker.type);
+      const g = ctx.game;
+      if (meta && meta.domain === "land" && g.terrain && g.terrain[attacker.y] && g.terrain[attacker.y][attacker.x] === "forest" && !state8.annamFirstHit.has(attacker.id)) {
+        state8.annamFirstHit.add(attacker.id);
+        result.damage += NATION_MECHANICS.annamAmbushBonus;
+        ctx.log(`${ctx.typeMeta(attacker.type).name}从丛林中发动伏击，伤害 +${NATION_MECHANICS.annamAmbushBonus}。`, "battle");
+      }
+    }
+  }
+  function attachDebug7(ctx) {
+    const debug = {
+      config: () => ({ ...NATION_MECHANICS }),
+      state: () => ({ annamFirstHit: [...state8.annamFirstHit] }),
+      shuzhai: (unitId) => {
+        const u = ctx.game.units.find((x) => x.id === unitId);
+        return u ? atShuzhai(ctx, u) : null;
+      },
+      stealth: (owner) => ctx.game.units.filter((u) => u.owner === (owner || "player") && u.type === "jinyiwei").map((u) => ({ id: u.id, x: u.x, y: u.y, hidden: ctx.hasStatus(u.id, NATION_MECHANICS.stealthKey) }))
+    };
+    if (typeof globalThis !== "undefined") globalThis.__mingDebug = { ...globalThis.__mingDebug || {}, nations: debug };
+    return debug;
+  }
+  var mingSystem = {
+    id: "ming",
+    // 注册时调用一次：挂载 debug/test 入口（浏览器控制台可用）
+    init(ctx) {
+      attachDebug5(ctx);
+      attachDebug6(ctx);
+      attachDebug7(ctx);
+    },
+    // turnStart：fireZone 到期移除 + 炮台/补给站结算 + 部署决策 + stealth/伏击重置
+    onTurnStart(ctx, payload) {
+      onTurnStart6(ctx, payload);
+      onTurnStart7(ctx, payload);
+      onTurnStart8(ctx, payload);
+    },
+    // beforeMove：敌方进入火力区受伤
+    onBeforeMove(ctx, payload) {
+      onBeforeMove5(ctx, payload);
+    },
+    // beforeAttack：交叉火力 + 壕沟/炮台/栈桥防御 + 水寨/丛林伏击（只改 result.damage）
+    onBeforeAttack(ctx, payload) {
+      onBeforeAttack3(ctx, payload);
+      onBeforeAttack4(ctx, payload);
+      onBeforeAttack5(ctx, payload);
+    },
+    // afterAttack：fireZone 生成 + 工程设施受损 + 锦衣卫暴露
+    onAfterAttack(ctx, payload) {
+      onAfterAttack5(ctx, payload);
+      onAfterAttack6(ctx, payload);
+      onAfterAttack7(ctx, payload);
+    },
+    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
+    reset() {
+      resetForTests6();
+      resetForTests7();
+      resetForTests8();
+    }
+  };
+
   // src/main.js
   (() => {
     "use strict";
@@ -3125,6 +3656,7 @@
       factionRegistry.register("goldenHorde", goldenHordeSystem, factionCtx);
       factionRegistry.register("venice", veniceSystem, factionCtx);
       factionRegistry.register("mamluk", mamlukSystem, factionCtx);
+      factionRegistry.register("ming", mingSystem, factionCtx);
       return factionCtx;
     }
     let fastSim = false;
@@ -5298,7 +5830,7 @@
     }
     function bestObjective(owner, unitEntry, intent = null) {
       const defaultAgg = AGG[game.aiProfiles?.[owner]?.agg || "balanced"] || AGG.balanced;
-      const state6 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
+      const state9 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
       const memory = frontMemory(owner);
       const isSea = typeMeta(unitEntry.type).domain === "sea";
       const pool = isSea ? [intent?.navalSite, intent?.assaultSite, intent?.expansionSite, ...intent?.alternateSites || []] : [intent?.expansionSite, intent?.assaultSite, ...intent?.alternateSites || []];
@@ -5315,7 +5847,7 @@
         if (strategicSiteValue(siteEntry, owner, unitEntry) <= 0) {
           return;
         }
-        if (state6.rerouteTurns > 0 && state6.failedObjectiveKey === `site:${key}`) {
+        if (state9.rerouteTurns > 0 && state9.failedObjectiveKey === `site:${key}`) {
           return;
         }
         if (memory[`site:${key}`]?.cooldown > 0) {
@@ -5448,9 +5980,9 @@
       }
       return distances;
     }
-    function finalizeUnitState(unitEntry, state6, objectiveKey, movedThisTurn) {
-      const stalledTurns = movedThisTurn ? 0 : state6.stalledTurns + 1;
-      const rerouteTurns = movedThisTurn ? Math.max(0, state6.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state6.rerouteTurns - 1);
+    function finalizeUnitState(unitEntry, state9, objectiveKey, movedThisTurn) {
+      const stalledTurns = movedThisTurn ? 0 : state9.stalledTurns + 1;
+      const rerouteTurns = movedThisTurn ? Math.max(0, state9.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state9.rerouteTurns - 1);
       rememberFrontOutcome(unitEntry.owner, objectiveKey, movedThisTurn);
       if (!movedThisTurn && stalledTurns >= 2 && objectiveKey.startsWith("site:")) {
         const siteId = objectiveKey.slice(5);
@@ -5461,7 +5993,7 @@
         lastPosition: { x: unitEntry.x, y: unitEntry.y },
         stalledTurns,
         rerouteTurns,
-        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state6.failedObjectiveKey
+        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state9.failedObjectiveKey
       };
     }
     function targetValue(unitEntry) {
@@ -5544,7 +6076,7 @@
     function chooseAction(owner, unitEntry, profile, intent = null) {
       const diffCfg = DIFF[profile.diff];
       const aggCfg = AGG[profile.agg];
-      const state6 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
+      const state9 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
       const cells = [...reachable(game, unitEntry).entries()].map(([key, cost]) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y, cost };
@@ -5563,13 +6095,13 @@
         const moveScore = objective ? (currentPath - nextPath) * 2.9 * diffCfg.lookahead * aggCfg.push : 0;
         const supportScore = friendSupport(owner, cell.x, cell.y);
         const riskPenalty = enemyThreat(owner, cell.x, cell.y) * diffCfg.risk * aggCfg.preserve * 0.9;
-        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state6.stalledTurns * 0.7);
+        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state9.stalledTurns * 0.7);
         const siteEntry = getSite2(cell.x, cell.y);
         const captureScore = siteEntry ? strategicSiteValue(siteEntry, owner, unitEntry) + cityEconomyValue(siteEntry, owner) : 0;
         const intentBonus = intent?.assaultSite ? Math.max(0, dist(unitEntry, intent.assaultSite) - dist(cell, intent.assaultSite)) * 1.4 * assaultMag : 0;
         const expansionBonus = intent?.expansionSite ? Math.max(0, dist(unitEntry, intent.expansionSite) - dist(cell, intent.expansionSite)) * 1.9 * aggCfg.expansion * expansionMag : 0;
         const futureCityPressure = objective ? Math.max(0, futureReach(unitEntry, diffCfg.lookahead) - dist(cell, objective)) * 0.35 : 0;
-        const rerouteBonus = state6.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
+        const rerouteBonus = state9.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
         const terrainBonus = game.terrain[cell.y][cell.x] === "forest" ? 3 * aggCfg.forestBias : 0;
         const roleBonus = unitRoleCellBonus(owner, unitEntry, cell, intent);
         const base = moveScore + supportScore + captureScore + intentBonus + expansionBonus + futureCityPressure + rerouteBonus + terrainBonus + roleBonus - riskPenalty - congestionPenalty;
@@ -5997,18 +6529,18 @@
         if (!game.units.includes(unitEntry)) {
           continue;
         }
-        const state6 = computeUnitState(unitEntry);
+        const state9 = computeUnitState(unitEntry);
         const startCell = { x: unitEntry.x, y: unitEntry.y };
         const assaultKey = intent.assaultSite ? `site:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}` : null;
         const bridgeheadCooldown = assaultKey ? memory[assaultKey]?.cooldown > 0 : false;
-        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state6.rerouteTurns > 0 && state6.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
+        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state9.rerouteTurns > 0 && state9.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
         if (bridgeheadBlocked && typeMeta(unitEntry.type).domain === "land" && profile.agg !== "reckless") {
           const retreatCell = bestRetreatCell(owner, unitEntry, intent.assaultSite);
           if (retreatCell && (retreatCell.x !== unitEntry.x || retreatCell.y !== unitEntry.y)) {
             incrementStrat(owner, "retreats");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}从桥头暂退，在 ${intent.assaultSite.name} 方向重整。`);
             moveUnit(unitEntry, retreatCell.x, retreatCell.y);
-            finalizeUnitState(unitEntry, state6, assaultKey || "idle", true);
+            finalizeUnitState(unitEntry, state9, assaultKey || "idle", true);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -6020,7 +6552,7 @@
           if (currentFrontline >= 4 && isReserveCandidate && unitEntry.hp > unitEntry.maxHp * 0.65) {
             incrementStrat(owner, "reserves");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}作为桥头预备队待机。`);
-            finalizeUnitState(unitEntry, state6, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
+            finalizeUnitState(unitEntry, state9, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -6028,13 +6560,13 @@
         }
         if (isTransportUnit(unitEntry)) {
           if (!unitEntry.cargo.length && autoLoadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state6, "transport-load", false);
+            finalizeUnitState(unitEntry, state9, "transport-load", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (unitEntry.cargo.length && autoUnloadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state6, "transport-unload", false);
+            finalizeUnitState(unitEntry, state9, "transport-unload", false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -6047,7 +6579,7 @@
             if (unitEntry.cargo.length && (nearThreat === 0 || escortAdjacent)) {
               autoUnloadAdjacent(unitEntry);
             }
-            finalizeUnitState(unitEntry, state6, `landing:${cellKey(landing.x, landing.y)}`, moved);
+            finalizeUnitState(unitEntry, state9, `landing:${cellKey(landing.x, landing.y)}`, moved);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -6056,13 +6588,13 @@
         if (unitEntry.type === "engineer") {
           const engineerChoice = engineerBuildChoice(owner, unitEntry, intent);
           if (engineerChoice?.kind === "camp" && buildCamp(unitEntry)) {
-            finalizeUnitState(unitEntry, state6, "camp", false);
+            finalizeUnitState(unitEntry, state9, "camp", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (engineerChoice?.cell && engineerLaunch(unitEntry, engineerChoice.kind, engineerChoice.cell, engineerChoice.cargoTypes || [])) {
-            finalizeUnitState(unitEntry, state6, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
+            finalizeUnitState(unitEntry, state9, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -6077,7 +6609,7 @@
         if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(game, unitEntry, choice.target)) {
           attack(unitEntry, choice.target);
         }
-        finalizeUnitState(unitEntry, state6, objectiveKey, !sameCell(startCell, unitEntry));
+        finalizeUnitState(unitEntry, state9, objectiveKey, !sameCell(startCell, unitEntry));
         refresh();
         await pause(aiStepDelay());
       }
