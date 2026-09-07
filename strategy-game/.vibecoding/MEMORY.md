@@ -25,6 +25,7 @@
 2. **`src/sim/` 空目录**：无内容，疑似遗留，可清理或忽略。
 3. **平衡性问题（待办）**：新增 4 兵种后 suite 需重新跑基线。旧有问题：mirror-strait B 胜率偏低、diff-gap 冷酷优势不足。后续 AI 改良+兵种调参时统一处理。（2026-09-06 复测：加威尼斯 9 兵种后 sim:suite 3/4 通过，diff-gap 冷酷 B 胜率仍 50%，与 d2be63d 基线完全一致——确认非威尼斯兵种引入的回归）
 4. **AI 对新兵种无针对性策略**：buildScore 对桨帆船/驳船/战舰/投石车走通用评分，没有特殊规则（如远程单位走位、战舰护航）。后续 AI 改良时优化。
+5. **雇佣兵老规矩（factionAdjustedCost 威尼斯 1.5×）待处理**（2026-09-07 用户拍板：**先不删**，阶段5 平衡时处理，**务必别忘**）：现状=威尼斯普通界面造任何非己方兵种 ×1.5（老规矩）与威尼斯对话做的"雇佣兵市场"（3 种兵 ×1.5）**双入口并存**。规格书 §7.4 本意=用市场取代随便造兵，需配套"收窄威尼斯普通界面可造兵种"（完全禁止/只留本国兵），只删 1.5× 会让威尼斯原价万能造兵且市场白做。注意 factionAdjustedCost 是四合一函数（威尼斯 1.5×/拉古萨 0.95×/威尼斯本部造船 0.8×/大明本部造船 0.9×），被 4 处调用（buildAtSite 1499/transport 1581,1601/AI 生产 2844），删必须精确到威尼斯那一个条件，勿误伤其余三条。
 
 ## 路线图（用户确认）
 1. **地基重构**（进行中）：core 层拆分（mapgen ✅ / teams ✅ / combat ✅ / rng → movement → turn）
@@ -40,6 +41,7 @@
 - 附属对话 handoff 规范见施工图第五节（路径/必读/硬约束/验收/回传）。
 
 ## 踩坑与根因（按时间倒序）
+- **2026-09-07 · 马穆鲁克 handoff-D 要点**：精锐成长（veterancy：经验=伤害/击杀/占领→V1攻+1自动/V2防+1自动/**V3三选一决策**冲锋/回血/移动→Elite称号）+ 士气（精锐击杀+1死亡-3；高=经验快+骑兵首攻增强，低=新生兵攻击降+**精锐恢复降低[GH-06缺口,推荐降级]**）+ eliteLost（V3+精锐死亡=金币+士气-3+经验清零）。三国：埃及尼罗河补给（河流/城市旁回血+经验，turnStart 直改 unit.hp，金帐先例）/叙利亚长弓火线（协同射击）/巴格达学术指令（**学者四选一**：守势/进攻/机动/整军）。**关键决策：AI 精锐 V3 不自动晋升（停在 V2）**——不能给 AI 发晋升决策（sim 自动选第一项=悄悄改 AI 数值）。经验/死亡检测用 afterAttack.defenderDead，不用 unitKilled（GH-09）。士气改伤害挂 beforeAttack（注册顺序 hre→gh→venice→mamluk 叠加）。文件 `.vibecoding/v0.2-handoff-D-mamluk.md`。
 - **2026-09-07 · 威尼斯集成：契约 §6 钩子签名表整体与实现不符**：registry 实际分发 `system[hook](ctx, payload)`，契约 v1.2 表却写 `(ctx, owner, initial)`/`(ctx, owner, amountRef)` 等多参数写法——HRE/GH 一直按 `(ctx, payload)` 实现没冲突，威尼斯 `onIncomeCalculated` 明确要求"直接改 amount"才暴露。教训：**契约签名必须以 factionRegistry 分发代码为准**（威尼斯对话已把这条写进它的经验教训）。已修契约 §6 统一为 `(ctx, payload)` + v1.3 变更记录。
 - **2026-09-07 · incomeCalculated 引用语义验证**：main.js grantIncome 用 `incomePayload = {owner, amount}` 对象 emit 后读 `incomePayload.amount`（引用传递）——威尼斯 `payload.amount += bonus` 真实生效。判定：**凡"钩子改 payload 字段"必须核实 main.js 埋点是否引用语义**，不能只看 harness（harness 自己构造 payload 会假绿）。
 - **2026-09-07 · 威尼斯接线后默认局零变化、注入局差异符合画像**：transportLaunches 6→29（海军经济+港口半价产船）、engineerLandings 71→1、sells 301→125、retreats 89→0；AI 不建路线/不借贷（决策仅 player）→ 被动机制（垄断产船/1.25 收入）对 AI 生效是设计意图。
