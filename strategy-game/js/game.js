@@ -841,6 +841,189 @@
     return seen;
   }
 
+  // src/core/turn.js
+  function teamStandings(game, deps) {
+    const { teamOf: teamOf2 } = deps;
+    const standings = {};
+    const ensure = (team) => standings[team] = standings[team] || { cities: 0, sites: 0, units: 0 };
+    for (const siteEntry of game.sites) {
+      if (siteEntry.owner === "neutral") {
+        continue;
+      }
+      const bucket = ensure(teamOf2(siteEntry.owner));
+      bucket.sites += 1;
+      if (siteEntry.kind === "city") {
+        bucket.cities += 1;
+      }
+    }
+    for (const unitEntry of game.units) {
+      ensure(teamOf2(unitEntry.owner)).units += 1;
+    }
+    return standings;
+  }
+  function resolveStalemate(game, deps) {
+    const { teamOf: teamOf2, teamName, finish } = deps;
+    const standings = teamStandings(game, deps);
+    const ranked = Object.entries(standings).sort((a, b) => b[1].cities - a[1].cities || b[1].sites - a[1].sites || b[1].units - a[1].units);
+    if (!ranked.length) {
+      finish(false, `战局在第 ${game.turn} 回合陷入僵局，双方均无立足点。`);
+      return;
+    }
+    const [leadTeam, lead] = ranked[0];
+    const playerWin = !game.settings?.spectator && teamOf2("player") === leadTeam;
+    finish(playerWin, `战局在第 ${game.turn} 回合达到回合上限，判定 ${teamName(leadTeam)} 以 ${lead.cities} 城 / ${lead.sites} 据点领先胜出。`);
+  }
+  function landUnitCanReachForeignCity(game, deps, unitEntry) {
+    const { typeMeta: typeMeta2, cellKey: cellKey2, getSite: getSite2, areAllies: areAllies2, adjacent8: adjacent82, isLandTile } = deps;
+    if (typeMeta2(unitEntry.type).domain !== "land") {
+      return false;
+    }
+    const seen = /* @__PURE__ */ new Set([cellKey2(unitEntry.x, unitEntry.y)]);
+    const queue = [{ x: unitEntry.x, y: unitEntry.y }];
+    while (queue.length) {
+      const current = queue.shift();
+      const siteEntry = getSite2(current.x, current.y);
+      if (siteEntry?.kind === "city" && !areAllies2(siteEntry.owner, unitEntry.owner)) {
+        return true;
+      }
+      for (const next of adjacent82(current.x, current.y)) {
+        if (!isLandTile(next.x, next.y)) {
+          continue;
+        }
+        const nextKey = cellKey2(next.x, next.y);
+        if (seen.has(nextKey)) {
+          continue;
+        }
+        seen.add(nextKey);
+        queue.push(next);
+      }
+    }
+    return false;
+  }
+  function teamCanContestLand(game, deps, team) {
+    const { teamOf: teamOf2, isTransportUnit: isTransportUnit2, typeMeta: typeMeta2 } = deps;
+    if (game.sites.some((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) === team)) {
+      return true;
+    }
+    if (game.units.some((unitEntry) => teamOf2(unitEntry.owner) === team && isTransportUnit2(unitEntry) && unitEntry.cargo?.length)) {
+      return true;
+    }
+    const landUnits = game.units.filter((unitEntry) => teamOf2(unitEntry.owner) === team && typeMeta2(unitEntry.type).domain === "land");
+    if (landUnits.some((u) => landUnitCanReachForeignCity(game, deps, u))) {
+      return true;
+    }
+    const hasTransport = game.units.some((unitEntry) => teamOf2(unitEntry.owner) === team && isTransportUnit2(unitEntry));
+    const hasShipyard = game.sites.some((siteEntry) => siteEntry.kind === "shipyard" && teamOf2(siteEntry.owner) === team);
+    return !!landUnits.length && (hasTransport || hasShipyard);
+  }
+  function dominantCityTeam(game, deps) {
+    const { teamOf: teamOf2 } = deps;
+    const cityTeams = [...new Set(game.sites.filter((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)))];
+    return cityTeams.length === 1 ? cityTeams[0] : null;
+  }
+  function checkEnd(game, deps) {
+    const { teamOf: teamOf2, areAllies: areAllies2, teamName, finish } = deps;
+    if (game.over || game.freeplay) {
+      return;
+    }
+    if (game.settings?.spectator) {
+      const activeTeams2 = /* @__PURE__ */ new Set();
+      for (const unitEntry of game.units) {
+        activeTeams2.add(teamOf2(unitEntry.owner));
+      }
+      for (const siteEntry of game.sites) {
+        if (siteEntry.owner !== "neutral") {
+          activeTeams2.add(teamOf2(siteEntry.owner));
+        }
+      }
+      if (game.settings.mode === "skirmish") {
+        const combatTeams = new Set(game.units.map((unitEntry) => teamOf2(unitEntry.owner)));
+        if (combatTeams.size === 1 && combatTeams.size > 0) {
+          finish(true, `${teamName([...combatTeams][0])} 赢得了观战遭遇战。`);
+        }
+        return;
+      }
+      if (game.settings.mode === "survival" && game.turn >= 12) {
+        const ranked = [...activeTeams2].sort((a, b) => game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf2(siteEntry.owner) === b).length - game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf2(siteEntry.owner) === a).length);
+        if (ranked[0]) {
+          finish(true, `${teamName(ranked[0])} 在观战守城模式中存活到第12回合。`);
+        }
+        return;
+      }
+      const hostileTeams2 = new Set(game.sites.filter((siteEntry) => (siteEntry.kind === "city" || siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)));
+      if (hostileTeams2.size === 1) {
+        const winnerTeam = [...hostileTeams2][0];
+        const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== winnerTeam));
+        if (!enemyEngineers) {
+          finish(true, `${teamName(winnerTeam)} 完成了全部敌对城市与海上据点占领，并清除了敌方工程师。`);
+          return;
+        }
+      }
+      if (activeTeams2.size === 1 && activeTeams2.size > 0) {
+        finish(true, `${teamName([...activeTeams2][0])} 成为战场最后赢家。`);
+      }
+      return;
+    }
+    const playerTeam = teamOf2("player");
+    const activeTeams = /* @__PURE__ */ new Set();
+    for (const unitEntry of game.units) {
+      activeTeams.add(teamOf2(unitEntry.owner));
+    }
+    for (const siteEntry of game.sites) {
+      if (siteEntry.owner !== "neutral") {
+        activeTeams.add(teamOf2(siteEntry.owner));
+      }
+    }
+    const playerAlive = [...activeTeams].includes(playerTeam);
+    if (game.settings.mode === "survival") {
+      const alliedCity = game.sites.some((siteEntry) => siteEntry.kind === "city" && areAllies2(siteEntry.owner, "player"));
+      if (!alliedCity && !game.units.some((unitEntry) => areAllies2(unitEntry.owner, "player"))) {
+        finish(false, "你的组已经失去全部立足点。");
+        return;
+      }
+      if (game.turn >= 12 && alliedCity) {
+        finish(true, "你成功守住了关键城市直到第12回合。");
+      }
+      return;
+    }
+    if (game.settings.mode === "skirmish") {
+      const combatTeams = new Set(game.units.map((unitEntry) => teamOf2(unitEntry.owner)));
+      if (!combatTeams.has(playerTeam)) {
+        finish(false, "你的组全部野战部队已被消灭。");
+        return;
+      }
+      if (combatTeams.size === 1 && combatTeams.has(playerTeam)) {
+        finish(true, "敌对组野战部队已全部被消灭。");
+      }
+      return;
+    }
+    const enemyControlledCities = game.sites.filter((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) !== playerTeam);
+    const enemyControlledSeaSites = game.sites.filter((siteEntry) => (siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) !== playerTeam);
+    if (!enemyControlledCities.length && !enemyControlledSeaSites.length) {
+      const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== playerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== playerTeam));
+      if (!enemyEngineers) {
+        finish(true, "你已占领全部敌对城市与海上据点，并清除了全部敌方工程师。");
+        return;
+      }
+    }
+    const hostileTeams = new Set(game.sites.filter((siteEntry) => (siteEntry.kind === "city" || siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)));
+    if (hostileTeams.size === 1 && !hostileTeams.has(playerTeam)) {
+      const winnerTeam = [...hostileTeams][0];
+      const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== winnerTeam));
+      if (!enemyEngineers) {
+        finish(false, "敌方已占领全部城市与海上据点，并清除了你方全部工程师。");
+        return;
+      }
+    }
+    if (!playerAlive) {
+      finish(false, "你的组已经失去全部据点与部队。");
+      return;
+    }
+    if (activeTeams.size === 1 && activeTeams.has(playerTeam)) {
+      finish(true, "战场上只剩下你的组仍具战争能力。");
+    }
+  }
+
   // src/core/events.js
   var handlers = /* @__PURE__ */ new Map();
   var eventBus = {
@@ -4612,7 +4795,7 @@
       game.units = game.units.filter((entry) => entry !== unitEntry);
       recordStatSnapshot("loss");
       if (!game.over) {
-        checkEnd();
+        checkEnd2();
       }
     }
     function attack(attacker, defender) {
@@ -4669,7 +4852,7 @@
         }
       }
       eventBus.emit("afterAttack", { attacker, defender, result, defenderDead: defender.hp <= 0, attackerDead: attacker.hp <= 0 });
-      checkEnd();
+      checkEnd2();
     }
     function strategicSiteValue(siteEntry, owner, unitEntry) {
       if (siteEntry.owner === owner || areAllies2(siteEntry.owner, owner)) {
@@ -4757,7 +4940,7 @@
       }
       recordStatSnapshot("capture");
       log(`${ownerName(unitEntry.owner)}夺取了${siteEntry.name}${siteEntry.tier < oldTier ? "，设施战损降级。" : "。"}`, "system");
-      checkEnd();
+      checkEnd2();
     }
     function moveUnit(unitEntry, x, y) {
       const cost = reachable(game, unitEntry).get(cellKey(x, y));
@@ -4943,7 +5126,7 @@
       }
       refresh();
       if (!initial) {
-        checkEnd();
+        checkEnd2();
       }
       if (owner !== "player" && !fastSim) {
         setTimeout(() => {
@@ -4961,7 +5144,7 @@
       if (game.currentIndex === 0) {
         game.turn += 1;
         if (game.turn > MAX_TURNS && !game.freeplay && !game.over) {
-          resolveStalemate();
+          resolveStalemate2();
           if (game.over) {
             return;
           }
@@ -4971,180 +5154,24 @@
       eventBus.emit("turnEnd", { owner: endedOwner });
       beginTurn(game.ownerOrder[game.currentIndex], false);
     }
-    function teamStandings() {
-      const standings = {};
-      const ensure = (team) => standings[team] = standings[team] || { cities: 0, sites: 0, units: 0 };
-      for (const siteEntry of game.sites) {
-        if (siteEntry.owner === "neutral") {
-          continue;
-        }
-        const bucket = ensure(teamOf2(siteEntry.owner));
-        bucket.sites += 1;
-        if (siteEntry.kind === "city") {
-          bucket.cities += 1;
-        }
-      }
-      for (const unitEntry of game.units) {
-        ensure(teamOf2(unitEntry.owner)).units += 1;
-      }
-      return standings;
+    const turnDeps = { teamOf: teamOf2, areAllies: areAllies2, teamName, typeMeta, isTransportUnit, cellKey, getSite: getSite2, adjacent8: adjacent82, isLandTile, finish };
+    function teamStandings2() {
+      return teamStandings(game, turnDeps);
     }
-    function resolveStalemate() {
-      const standings = teamStandings();
-      const ranked = Object.entries(standings).sort((a, b) => b[1].cities - a[1].cities || b[1].sites - a[1].sites || b[1].units - a[1].units);
-      if (!ranked.length) {
-        finish(false, `战局在第 ${game.turn} 回合陷入僵局，双方均无立足点。`);
-        return;
-      }
-      const [leadTeam, lead] = ranked[0];
-      const playerWin = !game.settings?.spectator && teamOf2("player") === leadTeam;
-      finish(playerWin, `战局在第 ${game.turn} 回合达到回合上限，判定 ${teamName(leadTeam)} 以 ${lead.cities} 城 / ${lead.sites} 据点领先胜出。`);
+    function resolveStalemate2() {
+      return resolveStalemate(game, turnDeps);
     }
-    function landUnitCanReachForeignCity(unitEntry) {
-      if (typeMeta(unitEntry.type).domain !== "land") {
-        return false;
-      }
-      const seen = /* @__PURE__ */ new Set([cellKey(unitEntry.x, unitEntry.y)]);
-      const queue = [{ x: unitEntry.x, y: unitEntry.y }];
-      while (queue.length) {
-        const current = queue.shift();
-        const siteEntry = getSite2(current.x, current.y);
-        if (siteEntry?.kind === "city" && !areAllies2(siteEntry.owner, unitEntry.owner)) {
-          return true;
-        }
-        for (const next of adjacent82(current.x, current.y)) {
-          if (!isLandTile(next.x, next.y)) {
-            continue;
-          }
-          const nextKey = cellKey(next.x, next.y);
-          if (seen.has(nextKey)) {
-            continue;
-          }
-          seen.add(nextKey);
-          queue.push(next);
-        }
-      }
-      return false;
+    function landUnitCanReachForeignCity2(unitEntry) {
+      return landUnitCanReachForeignCity(game, turnDeps, unitEntry);
     }
-    function teamCanContestLand(team) {
-      if (game.sites.some((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) === team)) {
-        return true;
-      }
-      if (game.units.some((unitEntry) => teamOf2(unitEntry.owner) === team && isTransportUnit(unitEntry) && unitEntry.cargo?.length)) {
-        return true;
-      }
-      const landUnits = game.units.filter((unitEntry) => teamOf2(unitEntry.owner) === team && typeMeta(unitEntry.type).domain === "land");
-      if (landUnits.some(landUnitCanReachForeignCity)) {
-        return true;
-      }
-      const hasTransport = game.units.some((unitEntry) => teamOf2(unitEntry.owner) === team && isTransportUnit(unitEntry));
-      const hasShipyard = game.sites.some((siteEntry) => siteEntry.kind === "shipyard" && teamOf2(siteEntry.owner) === team);
-      return !!landUnits.length && (hasTransport || hasShipyard);
+    function teamCanContestLand2(team) {
+      return teamCanContestLand(game, turnDeps, team);
     }
-    function dominantCityTeam() {
-      const cityTeams = [...new Set(game.sites.filter((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)))];
-      return cityTeams.length === 1 ? cityTeams[0] : null;
+    function dominantCityTeam2() {
+      return dominantCityTeam(game, turnDeps);
     }
-    function checkEnd() {
-      if (game.over || game.freeplay) {
-        return;
-      }
-      if (game.settings?.spectator) {
-        const activeTeams2 = /* @__PURE__ */ new Set();
-        for (const unitEntry of game.units) {
-          activeTeams2.add(teamOf2(unitEntry.owner));
-        }
-        for (const siteEntry of game.sites) {
-          if (siteEntry.owner !== "neutral") {
-            activeTeams2.add(teamOf2(siteEntry.owner));
-          }
-        }
-        if (game.settings.mode === "skirmish") {
-          const combatTeams = new Set(game.units.map((unitEntry) => teamOf2(unitEntry.owner)));
-          if (combatTeams.size === 1 && combatTeams.size > 0) {
-            finish(true, `${teamName([...combatTeams][0])} 赢得了观战遭遇战。`);
-          }
-          return;
-        }
-        if (game.settings.mode === "survival" && game.turn >= 12) {
-          const ranked = [...activeTeams2].sort((a, b) => game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf2(siteEntry.owner) === b).length - game.sites.filter((siteEntry) => siteEntry.kind === "city" && teamOf2(siteEntry.owner) === a).length);
-          if (ranked[0]) {
-            finish(true, `${teamName(ranked[0])} 在观战守城模式中存活到第12回合。`);
-          }
-          return;
-        }
-        const hostileTeams2 = new Set(game.sites.filter((siteEntry) => (siteEntry.kind === "city" || siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)));
-        if (hostileTeams2.size === 1) {
-          const winnerTeam = [...hostileTeams2][0];
-          const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== winnerTeam));
-          if (!enemyEngineers) {
-            finish(true, `${teamName(winnerTeam)} 完成了全部敌对城市与海上据点占领，并清除了敌方工程师。`);
-            return;
-          }
-        }
-        if (activeTeams2.size === 1 && activeTeams2.size > 0) {
-          finish(true, `${teamName([...activeTeams2][0])} 成为战场最后赢家。`);
-        }
-        return;
-      }
-      const playerTeam = teamOf2("player");
-      const activeTeams = /* @__PURE__ */ new Set();
-      for (const unitEntry of game.units) {
-        activeTeams.add(teamOf2(unitEntry.owner));
-      }
-      for (const siteEntry of game.sites) {
-        if (siteEntry.owner !== "neutral") {
-          activeTeams.add(teamOf2(siteEntry.owner));
-        }
-      }
-      const playerAlive = [...activeTeams].includes(playerTeam);
-      if (game.settings.mode === "survival") {
-        const alliedCity = game.sites.some((siteEntry) => siteEntry.kind === "city" && areAllies2(siteEntry.owner, "player"));
-        if (!alliedCity && !game.units.some((unitEntry) => areAllies2(unitEntry.owner, "player"))) {
-          finish(false, "你的组已经失去全部立足点。");
-          return;
-        }
-        if (game.turn >= 12 && alliedCity) {
-          finish(true, "你成功守住了关键城市直到第12回合。");
-        }
-        return;
-      }
-      if (game.settings.mode === "skirmish") {
-        const combatTeams = new Set(game.units.map((unitEntry) => teamOf2(unitEntry.owner)));
-        if (!combatTeams.has(playerTeam)) {
-          finish(false, "你的组全部野战部队已被消灭。");
-          return;
-        }
-        if (combatTeams.size === 1 && combatTeams.has(playerTeam)) {
-          finish(true, "敌对组野战部队已全部被消灭。");
-        }
-        return;
-      }
-      const enemyControlledCities = game.sites.filter((siteEntry) => siteEntry.kind === "city" && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) !== playerTeam);
-      const enemyControlledSeaSites = game.sites.filter((siteEntry) => (siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral" && teamOf2(siteEntry.owner) !== playerTeam);
-      if (!enemyControlledCities.length && !enemyControlledSeaSites.length) {
-        const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== playerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== playerTeam));
-        if (!enemyEngineers) {
-          finish(true, "你已占领全部敌对城市与海上据点，并清除了全部敌方工程师。");
-          return;
-        }
-      }
-      const hostileTeams = new Set(game.sites.filter((siteEntry) => (siteEntry.kind === "city" || siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && siteEntry.owner !== "neutral").map((siteEntry) => teamOf2(siteEntry.owner)));
-      if (hostileTeams.size === 1 && !hostileTeams.has(playerTeam)) {
-        const winnerTeam = [...hostileTeams][0];
-        const enemyEngineers = game.units.some((unitEntry) => unitEntry.type === "engineer" && teamOf2(unitEntry.owner) !== winnerTeam || unitEntry.cargo?.some((payload) => payload.type === "engineer" && teamOf2(payload.owner) !== winnerTeam));
-        if (!enemyEngineers) {
-          finish(false, "敌方已占领全部城市与海上据点，并清除了你方全部工程师。");
-          return;
-        }
-      }
-      if (!playerAlive) {
-        finish(false, "你的组已经失去全部据点与部队。");
-        return;
-      }
-      if (activeTeams.size === 1 && activeTeams.has(playerTeam)) {
-        finish(true, "战场上只剩下你的组仍具战争能力。");
-      }
+    function checkEnd2() {
+      return checkEnd(game, turnDeps);
     }
     function finish(win, text) {
       game.over = true;
@@ -6548,7 +6575,7 @@
       if (cached !== void 0) {
         return cached;
       }
-      const result = game.units.some((unitEntry) => unitEntry.owner === owner && typeMeta(unitEntry.type).domain === "land" && landUnitCanReachForeignCity(unitEntry));
+      const result = game.units.some((unitEntry) => unitEntry.owner === owner && typeMeta(unitEntry.type).domain === "land" && landUnitCanReachForeignCity2(unitEntry));
       landReachCache.set(owner, result);
       return result;
     }
@@ -6578,7 +6605,7 @@
         return null;
       }
       const ownedTransports = game.units.filter((unitEntry) => unitEntry.owner === owner && isTransportUnit(unitEntry)).length;
-      const landWaiting = game.units.some((unitEntry) => unitEntry.owner === owner && typeMeta(unitEntry.type).domain === "land" && unitEntry.type !== "engineer" && !landUnitCanReachForeignCity(unitEntry));
+      const landWaiting = game.units.some((unitEntry) => unitEntry.owner === owner && typeMeta(unitEntry.type).domain === "land" && unitEntry.type !== "engineer" && !landUnitCanReachForeignCity2(unitEntry));
       const needFerry = !landFrontExists && enemyCities.length > 0 && landWaiting;
       if (needFerry && ownedTransports < 2 && game.goldByOwner[owner] >= transportCost(["engineer"]) && !atUnitCap(owner, "sea")) {
         const cargoTypes = chooseTransportCargo(owner, game.goldByOwner[owner], true);
@@ -7731,7 +7758,7 @@
         batch: (cap = 150, rounds = 10, seed = 20260804) => fastBatch(cap, rounds, seed),
         stop: () => {
           if (game && !game.over) {
-            resolveStalemate();
+            resolveStalemate2();
           }
           return debugSummary();
         },
