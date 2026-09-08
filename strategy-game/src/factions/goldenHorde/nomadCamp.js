@@ -6,14 +6,15 @@
 //
 // 与 main.js 现有"临时营地"（site.kind='camp'，工程师建造）严格区分：
 //  - 现有 camp 是 site，走 buildAtSite 通用生产；本模块是 facility，独立存储。
-//  - 建造/生产/迁移决策全部用 requestDecision/resolveDecision（无头 sim 自动选
-//    第一项"不建/维持"，保证 sim 零行为变化；决策仅对人类玩家发起，AI 阶段6接入）。
+//  - 建造/生产/迁移决策全部用 requestDecision/resolveDecision（无头 sim 非 AI owner
+//    自动选第一项"不建/维持"；AI owner 由 src/ai/ AI 决策系统选择，阶段6 F1 接入）。
 //
 // 接口依赖（v1.2 已落地）：
 //  - GH-02 ctx.createUnit(type, owner, x, y)：生产走 ctx，金币/上限/位置校验本模块自查。
 //  - GH-01 生产完成后由本模块广播 productionCompleted（site 字段传营地 facility）。
 
 import { isGoldenHordeOwner } from './raiding.js';
+import { isAiOwner } from '../../ai/aiUtil.js';
 import { inOasisNetwork, getPrestige, GOLDEN_HORDE_NATION as GHN } from './nationMechanics.js';
 
 // ---------------------------------------------------------------------------
@@ -95,7 +96,7 @@ function isValidCampCell(ctx, x, y) {
 }
 
 // ---------------------------------------------------------------------------
-// 建造决策（decision.js；无头 sim 自动选"不建"= 零行为变化）
+// 建造决策（decision.js；无头 sim 非 AI owner 自动选"不建"；AI 由 src/ai/ 决策）
 // ---------------------------------------------------------------------------
 export function requestBuildDecision(ctx, unit) {
   if (!canBuildCampAt(ctx, unit)) return null;
@@ -109,6 +110,7 @@ export function requestBuildDecision(ctx, unit) {
   return ctx.requestDecision(decisionId, {
     owner,
     unitId,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态
     title: '游牧营地',
     description: `${ctx.typeMeta(unit.type).name}可在此格建立游牧营地（消耗本回合行动并花费金币）。`,
     options,
@@ -181,6 +183,8 @@ export function requestCampDecision(ctx, camp) {
   const decisionId = `ghCamp_${camp.id}`;
   return ctx.requestDecision(decisionId, {
     owner,
+    campId: camp.id, // 阶段6 F1：AI 决策系统按 id 定位营地
+    ctx,             // 阶段6 F1：供 AI 决策系统查询战场状态
     title: '游牧营地行动',
     description: `游牧营地（${camp.x},${camp.y}）本回合可生产金帐单位或迁移（消耗营地本回合行动）。`,
     options,
@@ -264,8 +268,8 @@ export function onTurnStart(ctx, payload) {
     }
   }
 
-  // 3. 决策：仅人类玩家（无头 sim 无 'player' owner → 零请求 → 零行为变化；AI 阶段6接入）
-  if (owner === 'player') {
+  // 3. 决策：人类玩家与 AI（阶段6 F1 接入；AI 选择由 src/ai/ 决策系统完成）
+  if (owner === 'player' || isAiOwner(owner)) {
     for (const unit of ctx.game.units) {
       if (unit.owner === owner && canBuildCampAt(ctx, unit)) {
         requestBuildDecision(ctx, unit);

@@ -10,7 +10,7 @@
 //  - 经验来源：造成伤害（1 XP/点）/ 击杀（+10）/ 关键战斗（击杀 level>=3 单位 +5）/
 //    占领据点（+15）。埃及河边 ×1.5；高士气 ×1.5（乘法叠加，取整）。
 //  - 等级阈值：V1=30（攻击+1，自动）/ V2=70（防御+1，自动）/ V3=120（三选一，
-//    仅 owner==='player' 发起决策；AI 停在 V2，阶段6接入）/ Elite=200（联盟特殊称号）。
+//    玩家与 AI 均发起决策；AI 选择由 src/ai/ 决策系统完成，阶段6 F1）/ Elite=200（联盟特殊称号）。
 //  - 士气（模块级，按 owner 独立）：初始 50（0~100）；精锐击杀 +1 / 精锐死亡 -3；
 //    高士气 >=70：经验 ×1.5 + 骑兵（特殊单位）每回合首次攻击伤害 +2；
 //    低士气 <=30：新生兵（veteranLevel===0 或未建档）攻击 -1。
@@ -23,6 +23,8 @@
 //
 // 叠加顺序（契约 §2.4）：before 类事件 hre → goldenHorde → venice → mamluk，
 // 本模块 onBeforeAttack 看到的是前三个联盟改后的 result.damage，在其上继续叠加。
+
+import { isAiOwner } from '../../ai/aiUtil.js';
 
 // ---------------------------------------------------------------------------
 // 数值配置（最终值以此为准；阶段5统一平衡时可再调）
@@ -224,14 +226,13 @@ function checkLevel(ctx, unit, rec) {
     rec.lastPromotionTurn = ctx.game.turn || 0;
     ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Veteran 2（防御 +1）。`, 'system');
   }
-  // Veteran 3（玩家决策，三选一；AI 停在 V2，阶段6接入——不给 AI 发决策）
+  // Veteran 3（玩家与 AI 决策，三选一；AI 选择由 src/ai/ 决策系统完成，阶段6 F1）
   if (rec.veteranLevel === 2 && rec.xp >= VETERANCY.v3Threshold && !rec.promotion) {
-    if (unit.owner === 'player') {
+    if (unit.owner === 'player' || isAiOwner(unit.owner)) {
       if (!state.v3Requested.has(unit.id)) {
         requestV3Decision(ctx, unit, rec);
       }
     }
-    // AI：不晋升（保持 Veteran 2），已知问题记录
   }
   // Elite（联盟特殊称号，展示性，无数值）
   if (rec.veteranLevel >= 3 && !rec.elite && rec.xp >= VETERANCY.eliteThreshold) {
@@ -261,7 +262,8 @@ function addXp(ctx, unit, amount, reason) {
 }
 
 // ---------------------------------------------------------------------------
-// Veteran 3 三选一晋升（决策 API；无头 sim 自动选第一项"冲锋强化"）
+// Veteran 3 三选一晋升（决策 API；无头 sim 非 AI owner 自动选第一项"冲锋强化"；
+// AI owner 由 src/ai/ 决策系统选择，阶段6 F1）
 // ---------------------------------------------------------------------------
 const V3_OPTION_LABEL = { charge: '冲锋强化', bloodlust: '击杀回血', swift: '移动力强化' };
 
@@ -275,6 +277,7 @@ function requestV3Decision(ctx, unit, rec) {
   return ctx.requestDecision(`mlV3_${unit.id}`, {
     owner: unit.owner,
     unitId: unit.id,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态
     title: '精锐晋升',
     description: `${ctx.typeMeta(unit.type).name}达到 Veteran 3，选择晋升方向。`,
     options,
@@ -300,7 +303,8 @@ function applyV3Promotion(ctx, unit, choiceId) {
 }
 
 // ---------------------------------------------------------------------------
-// 巴格达学术指令（决策 API；无头 sim 自动选第一项"守势"）
+// 巴格达学术指令（决策 API；无头 sim 非 AI owner 自动选第一项"守势"；
+// AI owner 由 src/ai/ 决策系统选择，阶段6 F1）
 // ---------------------------------------------------------------------------
 export const TACTIC_OPTIONS = [
   { id: 'defensive', label: '守势', description: '学者范围内己方单位被攻击时伤害 -1。' },
@@ -316,6 +320,7 @@ function requestTacticDecision(ctx, owner) {
   return ctx.requestDecision(`mlTactic_${owner}_${ctx.game.turn || 0}`, {
     owner,
     unitId: scholar.id,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态
     title: '学术指令',
     description: '哈里发学者每回合可选择一种战术，替代固定光环。',
     options: TACTIC_OPTIONS,
@@ -522,8 +527,8 @@ export function onTurnStart(ctx, payload) {
     }
   }
 
-  // 决策请求（仅人类玩家；无头 sim 无 'player' owner → 零请求 → 零行为变化）
-  if (owner === 'player') {
+  // 决策请求（人类玩家与 AI；阶段6 F1 接入，AI 选择由 src/ai/ 决策系统完成）
+  if (owner === 'player' || isAiOwner(owner)) {
     // 兜底：Veteran 3 晋升决策（正常在 addXp 内即时请求，此处防遗漏；v3Requested 去重）
     for (const u of ctx.game.units) {
       if (u.owner !== owner) continue;

@@ -6,6 +6,10 @@
 // （facility/decision/status）与 core 纯函数一律经 ctx 访问，不再直接 import。
 // 不修改 main.js 主流程、不修改 combat.js/movement.js 核心计算、不修改 EventBus 契约。
 // 需要主对话补的埋点：moveUnit 内 emit 'beforeMove'（位置：扣移动力之前），已由主对话完成（v1.1）。
+// 阶段6（F1）：建造决策对 AI owner（ai0/ai1/...）同样发起；选择由 src/ai/ AI 决策系统完成，
+// 本文件不写 AI 专用分支（只把 ctx 传入决策上下文供 AI 查询状态）。
+
+import { isAiOwner } from '../../ai/aiUtil.js';
 
 // 所有游戏访问一律经 ctx（facility/decision/diagonalDist/movementCost/areAllies 由 ctx 转发）。
 
@@ -112,7 +116,8 @@ export function canBuildAt(ctx, unit, type) {
 }
 
 // ---------------------------------------------------------------------------
-// 建造决策（decision.js，保留玩家决策点；无头 sim 自动选第一项"不建"=零行为变化）
+// 建造决策（decision.js，保留玩家决策点；无头 sim 非 AI owner 自动选第一项"不建"；
+// AI owner 由 src/ai/ AI 决策系统选择，阶段6 F1）
 // ---------------------------------------------------------------------------
 // 决策选项顺序固定：不建 → 木栅 → 壕沟 → 石堡（"不建"必须是第一项，sim fallback 依赖它）
 export function buildOptionsFor(ctx, unit) {
@@ -149,6 +154,7 @@ export function requestBuildDecision(ctx, unit) {
   return ctx.requestDecision(decisionId, {
     owner,
     unitId,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态（对玩家决策无影响）
     title: '帝国工事',
     description: `${ctx.typeMeta(unit.type).name}可在此格建造工事（消耗本回合行动并花费金币）。`,
     options,
@@ -301,8 +307,8 @@ export function onTurnStart(ctx, payload) {
   // 3. 重置每回合追踪（壕沟第一击 / 方阵第一击，以防守方回合为界）
   state.trenchFirstHit.clear();
   state.pikeGuardUsed.clear();
-  // 4. 建造决策：仅人类玩家（无头 sim 无 'player' owner → 零请求 → 零行为变化；AI 阶段6接入）
-  if (owner === 'player') {
+  // 4. 建造决策：人类玩家与 AI（阶段6 F1 接入；AI 选择由 src/ai/ 决策系统完成）
+  if (owner === 'player' || isAiOwner(owner)) {
     for (const unit of ctx.game.units) {
       if (unit.owner !== owner) continue;
       requestBuildDecision(ctx, unit);

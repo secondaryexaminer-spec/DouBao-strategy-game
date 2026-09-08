@@ -707,10 +707,10 @@
   var MULTIPLIER = 1664525;
   var INCREMENT = 1013904223;
   function createRng(seed) {
-    let state11 = seed >>> 0;
+    let state12 = seed >>> 0;
     return function rng() {
-      state11 = state11 * MULTIPLIER + INCREMENT >>> 0;
-      return state11 / MODULUS;
+      state12 = state12 * MULTIPLIER + INCREMENT >>> 0;
+      return state12 / MODULUS;
     };
   }
 
@@ -1443,173 +1443,30 @@
     return true;
   }
 
-  // src/core/decision.js
-  var pending = /* @__PURE__ */ new Map();
-  var nextDecisionId = 1;
-  function hasUI() {
-    return typeof document !== "undefined" && typeof window !== "undefined";
+  // src/ai/aiUtil.js
+  function isAiOwner(owner) {
+    return typeof owner === "string" && /^ai\d+$/.test(owner);
   }
-  var decisionSystem = {
-    requestDecision(decisionId, context) {
-      const id = decisionId || `dec_${nextDecisionId++}`;
-      const record = { id, context, resolved: false, choiceId: null };
-      pending.set(id, record);
-      if (!hasUI()) {
-        const choice = context.options && context.options[0];
-        const choiceId = choice ? choice.id : null;
-        console.log(`[decision:auto-resolve] ${id} → ${choiceId} (test fallback, not a game rule)`);
-        this.resolveDecision(id, choiceId);
-      }
-      return record;
-    },
-    resolveDecision(decisionId, choiceId) {
-      const record = pending.get(decisionId);
-      if (!record || record.resolved) return false;
-      record.resolved = true;
-      record.choiceId = choiceId;
-      pending.delete(decisionId);
-      if (typeof record.context.onResolve === "function") {
-        try {
-          record.context.onResolve(choiceId);
-        } catch (e) {
-          console.error(`[decision] onResolve error (${decisionId}):`, e);
-        }
-      }
-      return true;
-    },
-    cancelDecision(decisionId) {
-      const record = pending.get(decisionId);
-      if (!record || record.resolved) return false;
-      record.resolved = true;
-      pending.delete(decisionId);
-      if (typeof record.context.onCancel === "function") {
-        try {
-          record.context.onCancel();
-        } catch (e) {
-          console.error(`[decision] onCancel error (${decisionId}):`, e);
-        }
-      }
-      return true;
-    },
-    getPendingDecisions(owner) {
-      return [...pending.values()].filter((r) => r.context.owner === owner && !r.resolved);
-    },
-    getDecision(decisionId) {
-      return pending.get(decisionId) || null;
-    },
-    clear() {
-      pending.clear();
+  function enemyCountNear(ctx, owner, x, y, range) {
+    if (!ctx || !ctx.game || !ctx.game.units) return 0;
+    let n = 0;
+    for (const u of ctx.game.units) {
+      if (u.owner === owner || u.owner === "neutral") continue;
+      if (ctx.areAllies(ctx.game.teams, u.owner, owner)) continue;
+      if (Math.abs(u.x - x) <= range && Math.abs(u.y - y) <= range) n += 1;
     }
-  };
-
-  // src/factions/factionContext.js
-  function createFactionContext(deps) {
-    return {
-      // —— 只读查询 ——
-      get game() {
-        return deps.gameRef();
-      },
-      getUnit: deps.getUnit,
-      getSite: deps.getSite,
-      getFacilityAt: (x, y) => facilitySystem.getFacilityAt(x, y),
-      typeMeta: deps.typeMeta,
-      terrainMeta: deps.terrainMeta,
-      ownerFaction: deps.ownerFaction,
-      ownerNation: deps.ownerNation,
-      hasStatus: (unitId, key) => statusSystem.hasStatus(unitId, key),
-      // —— 设施维护/查询（v1.1 补全：联盟系统不得直接 import facility.js） ——
-      createFacility: (type, owner, x, y, opts) => facilitySystem.createFacility(type, owner, x, y, opts),
-      removeFacility: (id) => facilitySystem.removeFacility(id),
-      damageFacility: (id, amount) => facilitySystem.damageFacility(id, amount),
-      expireFacilities: (owner) => facilitySystem.expireFacilities(owner),
-      getFacilitiesByOwner: (owner) => facilitySystem.getFacilitiesByOwner(owner),
-      getFacilitiesByType: (type) => facilitySystem.getFacilitiesByType(type),
-      getFacilitiesInRange: (x, y, range) => facilitySystem.getFacilitiesInRange(x, y, range),
-      getAllFacilities: () => facilitySystem.getAll(),
-      // —— 决策查询（v1.1 补全：debug/UI 用，不在 UI 层直接 import decision.js） ——
-      getPendingDecisions: (owner) => decisionSystem.getPendingDecisions(owner),
-      // —— 纯函数转发（v1.1：联盟系统无需 import core 纯函数） ——
-      diagonalDist: (a, b) => diagonalDist(a, b),
-      movementCost: (game, unitEntry, x, y) => movementCost(game, unitEntry, x, y),
-      areAllies: (teams, a, b) => areAllies(teams, a, b),
-      // —— 单位创建（v1.2：GH-02，委托 main.js 闭包 unit() 工厂；不做金币/上限/位置校验，业务由调用方自查） ——
-      createUnit: (type, owner, x, y) => deps.createUnit(type, owner, x, y),
-      // —— 安全动作（不改变战斗流程） ——
-      log: deps.log,
-      addGold: deps.addGold,
-      spendGold: deps.spendGold,
-      addStatus: (unitId, key, turns, data) => statusSystem.addStatus(unitId, key, turns, data),
-      removeStatus: (unitId, key) => statusSystem.removeStatus(unitId, key),
-      // —— 主动决策 ——
-      requestDecision: (decisionId, context) => decisionSystem.requestDecision(decisionId, context),
-      resolveDecision: (decisionId, choiceId) => decisionSystem.resolveDecision(decisionId, choiceId),
-      // —— 事件总线（联盟系统可自行订阅额外事件） ——
-      events: eventBus
-    };
+    return n;
   }
-
-  // src/factions/factionRegistry.js
-  var systems = /* @__PURE__ */ new Map();
-  var HOOK_TO_EVENT = {
-    onTurnStart: "turnStart",
-    onTurnEnd: "turnEnd",
-    onBeforeMove: "beforeMove",
-    onAfterMove: "afterMove",
-    onBeforeAttack: "beforeAttack",
-    onAfterAttack: "afterAttack",
-    onUnitCreated: "unitCreated",
-    onUnitKilled: "unitKilled",
-    onSiteCaptured: "siteCaptured",
-    onIncomeCalculated: "incomeCalculated",
-    onProductionCompleted: "productionCompleted"
-  };
-  var REGISTER_ORDER = ["hre", "goldenHorde", "venice", "mamluk", "ming"];
-  var factionRegistry = {
-    register(factionId, system, ctx) {
-      if (!REGISTER_ORDER.includes(factionId)) {
-        console.error(`[factionRegistry] unknown factionId: ${factionId}`);
-        return;
-      }
-      system.id = factionId;
-      systems.set(factionId, system);
-      if (typeof system.init === "function") {
-        try {
-          system.init(ctx);
-        } catch (e) {
-          console.error(`[factionRegistry] ${factionId}.init error:`, e);
-        }
-      }
-      for (const [hook, event] of Object.entries(HOOK_TO_EVENT)) {
-        if (typeof system[hook] === "function") {
-          eventBus.on(event, (payload) => {
-            try {
-              system[hook](ctx, payload);
-            } catch (e) {
-              console.error(`[factionRegistry] ${factionId}.${hook} error:`, e);
-            }
-          });
-        }
-      }
-    },
-    unregister(factionId) {
-      systems.delete(factionId);
-    },
-    get(factionId) {
-      return systems.get(factionId) || null;
-    },
-    getAll() {
-      return new Map(systems);
-    },
-    getRegisteredOrder() {
-      return REGISTER_ORDER.filter((id) => systems.has(id));
-    },
-    isRegistered(factionId) {
-      return systems.has(factionId);
-    },
-    clear() {
-      systems.clear();
+  function ownWoundedNear(ctx, owner, x, y, range) {
+    if (!ctx || !ctx.game || !ctx.game.units) return 0;
+    let n = 0;
+    for (const u of ctx.game.units) {
+      if (u.owner !== owner) continue;
+      if (u.hp >= u.maxHp) continue;
+      if (Math.abs(u.x - x) <= range && Math.abs(u.y - y) <= range) n += 1;
     }
-  };
+    return n;
+  }
 
   // src/factions/hre/fortification.js
   var FORTIFICATIONS = {
@@ -1738,6 +1595,8 @@
     return ctx.requestDecision(decisionId, {
       owner,
       unitId,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态（对玩家决策无影响）
       title: "帝国工事",
       description: `${ctx.typeMeta(unit2.type).name}可在此格建造工事（消耗本回合行动并花费金币）。`,
       options,
@@ -1875,7 +1734,7 @@
     applyFrontline(ctx, owner, initial);
     state.trenchFirstHit.clear();
     state.pikeGuardUsed.clear();
-    if (owner === "player") {
+    if (owner === "player" || isAiOwner(owner)) {
       for (const unit2 of ctx.game.units) {
         if (unit2.owner !== owner) continue;
         requestBuildDecision(ctx, unit2);
@@ -2029,108 +1888,80 @@
     return debug;
   }
 
-  // src/factions/hre/nationMechanics.js
-  var HRE_NATION = {
-    prussiaFormationMove: 1,
-    // 军阵协同：首次移动消耗 -1（预支移动力）
-    bavariaHillDefense: 1
-    // 山地防线：丘陵受击伤害 -1
-  };
-  var state2 = {
-    lastGameRef: null,
-    prussiaFormationUsed: /* @__PURE__ */ new Set()
-    // unitId：本回合已享受军阵协同（每回合重置）
-  };
-  function resetState2() {
-    state2.prussiaFormationUsed.clear();
-  }
-  function syncGameRef2(ctx) {
-    if (ctx && ctx.game !== state2.lastGameRef) {
-      resetState2();
-      state2.lastGameRef = ctx ? ctx.game : null;
+  // src/ai/hreAi.js
+  var FORT_TIER = ["palisade", "trench", "stoneFort"];
+  var ENEMY_RANGE = 4;
+  var CONTACT_RANGE = 2;
+  var NEED_THREAT_NORMAL = 2;
+  var NEED_THREAT_INFANTRY = 1;
+  var INFANTRY_BUILD_THRESHOLD = 6;
+  var GOLD_RESERVE = 20;
+  var MIRROR_RANGE = 8;
+  var BUILD_CAP_PER_TURN = 2;
+  var AI_BUILD_EXCLUDE = /* @__PURE__ */ new Set(["engineer", "heavyCatapult"]);
+  var state2 = { lastGameRef: null, turn: -1, built: 0 };
+  function selectHreFort(decisionId, context) {
+    if (process.env.F1_AB_NONE) return "none";
+    const { ctx, owner, unitId, options } = context || {};
+    if (!ctx || !ctx.game || !Array.isArray(options)) return "none";
+    if (ctx.game !== state2.lastGameRef) {
+      state2.lastGameRef = ctx.game;
+      state2.turn = -1;
+      state2.built = 0;
     }
-  }
-  function resetForTests2() {
-    resetState2();
-    state2.lastGameRef = null;
-  }
-  function hasFriendlyAdjacent(ctx, unit2) {
-    for (const other of ctx.game.units) {
-      if (other === unit2) continue;
-      if (!ctx.areAllies(ctx.game.teams, unit2.owner, other.owner)) continue;
-      if (Math.abs(other.x - unit2.x) <= 1 && Math.abs(other.y - unit2.y) <= 1) return true;
+    if (ctx.game.turn !== state2.turn) {
+      state2.turn = ctx.game.turn;
+      state2.built = 0;
     }
-    return false;
-  }
-  function onTurnStart2(ctx, payload) {
-    syncGameRef2(ctx);
-    state2.prussiaFormationUsed.clear();
-  }
-  function onBeforeMove2(ctx, payload) {
-    const { unit: unit2 } = payload || {};
-    if (!unit2) return;
-    syncGameRef2(ctx);
-    if (ctx.ownerNation(unit2.owner) !== "prussia") return;
-    if (unit2.move <= 0) return;
-    if (state2.prussiaFormationUsed.has(unit2.id)) return;
-    if (!hasFriendlyAdjacent(ctx, unit2)) return;
-    state2.prussiaFormationUsed.add(unit2.id);
-    unit2.move = unit2.move + HRE_NATION.prussiaFormationMove;
-    ctx.log(`${ctx.typeMeta(unit2.type).name}与友军列阵协同推进，本次移动消耗 -1。`, "system");
-  }
-  function onBeforeAttack2(ctx, payload) {
-    const { defender, result } = payload || {};
-    if (!defender || !result || !result.damage) return;
-    syncGameRef2(ctx);
-    if (ctx.ownerNation(defender.owner) !== "bavaria") return;
-    const g = ctx.game;
-    if (!g.terrain || !g.terrain[defender.y]) return;
-    if (g.terrain[defender.y][defender.x] !== "hill") return;
-    result.damage = Math.max(1, result.damage - HRE_NATION.bavariaHillDefense);
-    ctx.log(`${ctx.typeMeta(defender.type).name}依托山地防线固守，受击伤害 -1。`, "battle");
-  }
-  function attachDebug2(ctx) {
-    const debug = {
-      config: () => ({ ...HRE_NATION }),
-      state: () => ({ prussiaFormationUsed: [...state2.prussiaFormationUsed] })
-    };
-    if (typeof globalThis !== "undefined") globalThis.__hreDebug = { ...globalThis.__hreDebug || {}, nations: debug };
-    return debug;
-  }
-
-  // src/factions/hre/hreRules.js
-  var hreSystem = {
-    id: "hre",
-    // 注册时调用一次：挂载 debug/test 入口（globalThis.__hreDebug，浏览器控制台可用）
-    init(ctx) {
-      attachDebug(ctx);
-      attachDebug2(ctx);
-    },
-    // turnStart：工事过期、阵线检测/耐久/回血/状态、每回合追踪重置、人类玩家建造决策
-    onTurnStart(ctx, payload) {
-      onTurnStart(ctx, payload);
-      onTurnStart2(ctx, payload);
-    },
-    // beforeMove：木栅移动税 + 普鲁士军阵协同（需主对话在 moveUnit 内补 emit 'beforeMove'，见交付报告已知问题）
-    onBeforeMove(ctx, payload) {
-      onBeforeMove(ctx, payload);
-      onBeforeMove2(ctx, payload);
-    },
-    // beforeAttack：三种工事效果 + 4 个兵种联动 + 巴伐利亚山地防线（只改 result.damage）
-    onBeforeAttack(ctx, payload) {
-      onBeforeAttack(ctx, payload);
-      onBeforeAttack2(ctx, payload);
-    },
-    // afterAttack：工事可被攻击摧毁（按伤害比例受损）
-    onAfterAttack(ctx, payload) {
-      onAfterAttack(ctx, payload);
-    },
-    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
-    reset() {
-      resetForTests();
-      resetForTests2();
+    if (state2.built >= BUILD_CAP_PER_TURN) return "none";
+    const unit2 = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit2 || unit2.owner !== owner) return "none";
+    if (AI_BUILD_EXCLUDE.has(unit2.type)) return "none";
+    const gold = ctx.game.goldByOwner[owner] || 0;
+    let enemyNear = 0;
+    let enemyNearNonHre = 0;
+    for (const u of ctx.game.units) {
+      if (u.x == null || u.y == null) continue;
+      if (Math.abs(u.x - unit2.x) > MIRROR_RANGE || Math.abs(u.y - unit2.y) > MIRROR_RANGE) continue;
+      if (u.owner === owner || u.owner === "neutral") continue;
+      if (ctx.areAllies(ctx.game.teams, u.owner, owner)) continue;
+      enemyNear += 1;
+      if (ctx.ownerFaction(u.owner) !== "hre") enemyNearNonHre += 1;
     }
-  };
+    if (enemyNear > 0 && enemyNearNonHre === 0) return "none";
+    const threat = enemyCountNear(ctx, owner, unit2.x, unit2.y, ENEMY_RANGE);
+    if (threat <= 0) return "none";
+    let infantry = 0;
+    for (const u of ctx.game.units) {
+      if (u.owner !== owner) continue;
+      const meta = ctx.typeMeta(u.type);
+      if (meta && meta.domain === "land" && !meta.charge) infantry += 1;
+    }
+    const needThreat = infantry >= INFANTRY_BUILD_THRESHOLD ? NEED_THREAT_INFANTRY : NEED_THREAT_NORMAL;
+    if (threat < needThreat) return "none";
+    let contact = 0;
+    for (const u of ctx.game.units) {
+      if (u.owner === owner || u.owner === "neutral") continue;
+      if (ctx.areAllies(ctx.game.teams, u.owner, owner)) continue;
+      if (Math.abs(u.x - unit2.x) > CONTACT_RANGE || Math.abs(u.y - unit2.y) > CONTACT_RANGE) continue;
+      contact += 1;
+    }
+    const pick = (id) => options.some((o) => o.id === id) && gold - FORTIFICATIONS[id].cost >= GOLD_RESERVE;
+    if (contact > 0 && pick("trench")) {
+      state2.built += 1;
+      return "trench";
+    }
+    for (let i = FORT_TIER.length - 1; i >= 0; i--) {
+      const id = FORT_TIER[i];
+      if (!pick(id)) continue;
+      state2.built += 1;
+      return id;
+    }
+    return "none";
+  }
+  function registerHreAi(register) {
+    register("hreFort_", selectHreFort);
+  }
 
   // src/factions/goldenHorde/raiding.js
   var RAIDED_KEY = "raided";
@@ -2156,17 +1987,17 @@
     slowUsedThisTurn: /* @__PURE__ */ new Set()
     // unitId：本回合已因 raided 预扣过移动力（每 beginTurn 重置）
   };
-  function resetState3() {
+  function resetState2() {
     state3.slowUsedThisTurn.clear();
   }
-  function syncGameRef3(ctx) {
+  function syncGameRef2(ctx) {
     if (ctx && ctx.game !== state3.lastGameRef) {
-      resetState3();
+      resetState2();
       state3.lastGameRef = ctx ? ctx.game : null;
     }
   }
-  function resetForTests3() {
-    resetState3();
+  function resetForTests2() {
+    resetState2();
     state3.lastGameRef = null;
   }
   function debugState() {
@@ -2224,7 +2055,7 @@
       ctx.log(`${ctx.typeMeta(attacker.type).name}掠袭成功，缴获 ${gold} 金币。`, "gold");
     }
   }
-  function onBeforeMove3(ctx, payload) {
+  function onBeforeMove2(ctx, payload) {
     const { unit: unit2, from, to } = payload || {};
     if (!unit2 || !to || !from) return;
     if (unit2.move <= 0) return;
@@ -2239,8 +2070,8 @@
     unit2.move -= 1;
     state3.slowUsedThisTurn.add(unit2.id);
   }
-  function onTurnStart3(ctx, payload) {
-    syncGameRef3(ctx);
+  function onTurnStart2(ctx, payload) {
+    syncGameRef2(ctx);
     state3.slowUsedThisTurn.clear();
   }
 
@@ -2274,19 +2105,19 @@
     ambushUsed: /* @__PURE__ */ new Set()
     // unitId：本回合已享受蓝帐伏击
   };
-  function resetState4() {
+  function resetState3() {
     state4.prestige.clear();
     state4.cavFirstUsed.clear();
     state4.ambushUsed.clear();
   }
-  function syncGameRef4(ctx) {
+  function syncGameRef3(ctx) {
     if (ctx && ctx.game !== state4.lastGameRef) {
-      resetState4();
+      resetState3();
       state4.lastGameRef = ctx ? ctx.game : null;
     }
   }
-  function resetForTests4() {
-    resetState4();
+  function resetForTests3() {
+    resetState3();
     state4.lastGameRef = null;
   }
   function getPrestige(ctx, owner) {
@@ -2315,10 +2146,10 @@
     if (!g.terrain || !g.terrain[unit2.y]) return false;
     return GOLDEN_HORDE_NATION.ambushTerrains.includes(g.terrain[unit2.y][unit2.x]);
   }
-  function onTurnStart4(ctx, payload) {
+  function onTurnStart3(ctx, payload) {
     const owner = payload && payload.owner;
     const initial = !!(payload && payload.initial);
-    syncGameRef4(ctx);
+    syncGameRef3(ctx);
     state4.cavFirstUsed.clear();
     state4.ambushUsed.clear();
     if (initial) return;
@@ -2332,10 +2163,10 @@
       ctx.log(`${ctx.typeMeta(u.type).name}依托绿洲网络补给，回复 ${GOLDEN_HORDE_NATION.oasisHeal} 点生命。`, "battle");
     }
   }
-  function onBeforeAttack3(ctx, payload) {
+  function onBeforeAttack2(ctx, payload) {
     const { attacker, defender, result } = payload || {};
     if (!attacker || !defender || !result || !result.damage) return;
-    syncGameRef4(ctx);
+    syncGameRef3(ctx);
     if (isGoldenHordeCore(ctx, attacker.owner)) {
       const atkMeta = ctx.typeMeta(attacker.type);
       if (atkMeta && atkMeta.charge && getPrestige(ctx, attacker.owner) >= GOLDEN_HORDE_NATION.tierCavalry && !state4.cavFirstUsed.has(attacker.id)) {
@@ -2366,7 +2197,7 @@
   function onAfterAttack3(ctx, payload) {
     const { attacker, defender, defenderDead } = payload || {};
     if (!attacker) return;
-    syncGameRef4(ctx);
+    syncGameRef3(ctx);
     if (defenderDead && isGoldenHordeCore(ctx, attacker.owner)) {
       const next = getPrestige(ctx, attacker.owner) + GOLDEN_HORDE_NATION.prestigePerKill;
       state4.prestige.set(attacker.owner, next);
@@ -2387,7 +2218,7 @@
       ctx.log(`${ctx.typeMeta(attacker.type).name}伏击得手后迅速撤离，移动力恢复。`, "system");
     }
   }
-  function attachDebug3(ctx) {
+  function attachDebug2(ctx) {
     const debug = {
       config: () => ({ ...GOLDEN_HORDE_NATION }),
       prestige: (owner) => getPrestige(ctx, owner),
@@ -2418,16 +2249,16 @@
   var state5 = {
     lastGameRef: null
   };
-  function resetState5() {
+  function resetState4() {
   }
-  function syncGameRef5(ctx) {
+  function syncGameRef4(ctx) {
     if (ctx && ctx.game !== state5.lastGameRef) {
-      resetState5();
+      resetState4();
       state5.lastGameRef = ctx ? ctx.game : null;
     }
   }
-  function resetForTests5() {
-    resetState5();
+  function resetForTests4() {
+    resetState4();
     state5.lastGameRef = null;
   }
   function isLandCell2(ctx, x, y) {
@@ -2473,6 +2304,8 @@
     return ctx.requestDecision(decisionId, {
       owner,
       unitId,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
       title: "游牧营地",
       description: `${ctx.typeMeta(unit2.type).name}可在此格建立游牧营地（消耗本回合行动并花费金币）。`,
       options,
@@ -2539,6 +2372,10 @@
     const decisionId = `ghCamp_${camp.id}`;
     return ctx.requestDecision(decisionId, {
       owner,
+      campId: camp.id,
+      // 阶段6 F1：AI 决策系统按 id 定位营地
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
       title: "游牧营地行动",
       description: `游牧营地（${camp.x},${camp.y}）本回合可生产金帐单位或迁移（消耗营地本回合行动）。`,
       options,
@@ -2594,8 +2431,8 @@
     ctx.log(`游牧营地迁移到（${tx},${ty}），原址失去生产功能。`, "system");
     return true;
   }
-  function onTurnStart5(ctx, payload) {
-    syncGameRef5(ctx);
+  function onTurnStart4(ctx, payload) {
+    syncGameRef4(ctx);
     const owner = payload && payload.owner;
     const initial = !!(payload && payload.initial);
     if (!isGoldenHordeOwner(ctx, owner)) return;
@@ -2608,7 +2445,7 @@
         }
       }
     }
-    if (owner === "player") {
+    if (owner === "player" || isAiOwner(owner)) {
       for (const unit2 of ctx.game.units) {
         if (unit2.owner === owner && canBuildCampAt(ctx, unit2)) {
           requestBuildDecision2(ctx, unit2);
@@ -2620,81 +2457,60 @@
     }
   }
 
-  // src/factions/goldenHorde/goldenHordeRules.js
-  var goldenHordeSystem = {
-    id: "goldenHorde",
-    // 注册时调用一次：挂载 debug/test 入口（globalThis.__goldenHordeDebug，浏览器控制台可用）
-    init(ctx) {
-      attachDebug4(ctx);
-      attachDebug3(ctx);
-    },
-    // turnStart：先无条件重置掠袭去重标记（raided 作用于被打方，所有 owner 回合都要清），
-    // 再处理营地过期/维护/决策（内部判断金帐 owner）+ 国家机制（首攻标记重置/绿洲回血）。
-    onTurnStart(ctx, payload) {
-      onTurnStart3(ctx, payload);
-      onTurnStart5(ctx, payload);
-      onTurnStart4(ctx, payload);
-    },
-    // beforeMove：raided 移动力 -1（预扣；付不起则 cancel）+ 国家机制（无 beforeMove 项）
-    onBeforeMove(ctx, payload) {
-      onBeforeMove3(ctx, payload);
-    },
-    // beforeAttack：国家机制（可汗威望骑兵首攻/绿洲对骑兵/蓝帐伏击首攻，只改 result.damage）
-    onBeforeAttack(ctx, payload) {
-      onBeforeAttack3(ctx, payload);
-    },
-    // afterAttack：掠袭收益（击杀战利品）+ raided 标记（未击杀）+ 国家机制（威望/绿洲/撤离）
-    onAfterAttack(ctx, payload) {
-      onAfterAttack2(ctx, payload);
-      onAfterAttack3(ctx, payload);
-    },
-    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
-    reset() {
-      resetForTests3();
-      resetForTests5();
-      resetForTests4();
+  // src/ai/goldenHordeAi.js
+  var CAMP_BUILD_RESERVE_FIRST = 15;
+  var CAMP_BUILD_RESERVE_SECOND = 30;
+  var BUILD_ENEMY_RANGE = 4;
+  var CAMP_ALARM_RANGE = 3;
+  var MIGRATE_SAFE_RANGE = 3;
+  var PRODUCE_RESERVE = 10;
+  var PRODUCE_PRIORITY = ["hordeCavalry", "horseArcher", "lightCavalry", "nomadChariot", "nomadArcher"];
+  function selectGhCampBuild(decisionId, context) {
+    const { ctx, owner, unitId, options } = context || {};
+    if (!ctx || !ctx.game || !Array.isArray(options)) return "none";
+    if (!options.some((o) => o.id === "build")) return "none";
+    const camps = ctx.getFacilitiesByType(NOMAD_CAMP.type).filter((f) => f.owner === owner);
+    if (camps.length >= NOMAD_CAMP.maxCamps) return "none";
+    const unit2 = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit2 || unit2.owner !== owner) return "none";
+    const gold = ctx.game.goldByOwner[owner] || 0;
+    if (camps.length >= 1 && enemyCountNear(ctx, owner, unit2.x, unit2.y, BUILD_ENEMY_RANGE) > 0) return "none";
+    const reserve = camps.length === 0 ? CAMP_BUILD_RESERVE_FIRST : CAMP_BUILD_RESERVE_SECOND;
+    if (gold - NOMAD_CAMP.buildCost < reserve) return "none";
+    return "build";
+  }
+  function selectGhCampAction(decisionId, context) {
+    const { ctx, owner, campId, options } = context || {};
+    if (!ctx || !ctx.game || !Array.isArray(options)) return "none";
+    const camp = ctx.getFacilitiesByType(NOMAD_CAMP.type).find((f) => f.id === campId);
+    if (!camp || camp.owner !== owner) return "none";
+    const gold = ctx.game.goldByOwner[owner] || 0;
+    const curDanger = enemyCountNear(ctx, owner, camp.x, camp.y, CAMP_ALARM_RANGE);
+    if (curDanger > 0) {
+      let best = null;
+      for (const o of options) {
+        if (typeof o.id !== "string" || !o.id.startsWith("migrate:")) continue;
+        const parts = o.id.slice("migrate:".length).split(",");
+        const x = parseInt(parts[0], 10);
+        const y = parseInt(parts[1], 10);
+        if (Number.isNaN(x) || Number.isNaN(y)) continue;
+        const danger = enemyCountNear(ctx, owner, x, y, MIGRATE_SAFE_RANGE);
+        if (!best || danger < best.danger) best = { id: o.id, danger };
+      }
+      if (best && best.danger < curDanger) return best.id;
     }
-  };
-  function attachDebug4(ctx) {
-    const debug = {
-      config: () => ({
-        raidLoot: { ...RAID_LOOT },
-        raidPower: { moveMin: RAID_POWER_MOVE_MIN, levelMin: RAID_POWER_LEVEL_MIN, raidedTurns: RAIDED_TURNS },
-        camp: { ...NOMAD_CAMP },
-        producible: [...CAMP_PRODUCIBLE]
-      }),
-      // 当前所有游牧营地
-      camps: () => ctx.getFacilitiesByType(NOMAD_CAMP.type).map((f) => ({
-        id: f.id,
-        owner: f.owner,
-        x: f.x,
-        y: f.y,
-        duration: f.duration,
-        data: f.data,
-        occupant: ctx.getUnit(f.x, f.y) ? ctx.getUnit(f.x, f.y).type : null
-      })),
-      // 当前所有带 raided 标记的单位
-      raided: () => ctx.game.units.filter((u) => ctx.hasStatus(u.id, RAIDED_KEY)).map((u) => ({ id: u.id, type: u.type, owner: u.owner, x: u.x, y: u.y })),
-      state: () => ({ ...debugState() }),
-      // 查看某 owner 可建营地的单位
-      eligible: (owner) => ctx.game.units.filter((u) => u.owner === owner && canBuildCampAt(ctx, u)).map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y })),
-      // 为某 owner 所有可建单位发起建造决策；为所有营地发起行动决策（返回请求数）
-      requestForOwner: (owner) => {
-        let n = 0;
-        for (const u of ctx.game.units) {
-          if (u.owner === owner && requestBuildDecision2(ctx, u)) n += 1;
-        }
-        for (const c of myCamps(ctx, owner)) {
-          if (requestCampDecision(ctx, c)) n += 1;
-        }
-        return n;
-      },
-      // 查看未决金帐决策（浏览器 UI 阶段前的手动测试入口）
-      pending: () => ctx.getPendingDecisions("player").filter((r) => String(r.id || "").startsWith("ghCamp")).map((r) => ({ id: r.id, title: r.context.title, options: r.context.options.map((o) => o.id) })),
-      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId)
-    };
-    if (typeof globalThis !== "undefined") globalThis.__goldenHordeDebug = debug;
-    return debug;
+    for (const type of PRODUCE_PRIORITY) {
+      const opt = options.find((o) => o.id === `produce:${type}`);
+      if (!opt) continue;
+      const meta = ctx.typeMeta(type);
+      if (!meta) continue;
+      if (gold - meta.cost >= PRODUCE_RESERVE) return opt.id;
+    }
+    return "none";
+  }
+  function registerGoldenHordeAi(register) {
+    register("ghCampBuild_", selectGhCampBuild);
+    register("ghCamp_", selectGhCampAction);
   }
 
   // src/factions/venice/tradeNetwork.js
@@ -2757,18 +2573,18 @@
     mercs: /* @__PURE__ */ new Map()
     // owner -> { lastBuyTurn }（每回合最多买 1 次）
   };
-  function resetState6() {
+  function resetState5() {
     state6.loans.clear();
     state6.mercs.clear();
   }
-  function syncGameRef6(ctx) {
+  function syncGameRef5(ctx) {
     if (ctx && ctx.game !== state6.lastGameRef) {
-      resetState6();
+      resetState5();
       state6.lastGameRef = ctx ? ctx.game : null;
     }
   }
-  function resetForTests6() {
-    resetState6();
+  function resetForTests5() {
+    resetState5();
     state6.lastGameRef = null;
   }
   function debugState2() {
@@ -3008,7 +2824,7 @@
     }
     return newStatus;
   }
-  function onBeforeMove4(ctx, payload) {
+  function onBeforeMove3(ctx, payload) {
     const { unit: unit2, to } = payload || {};
     if (!unit2 || !to) return;
     for (const route of ctx.getFacilitiesByType(TRADE_ROUTE.type)) {
@@ -3038,7 +2854,7 @@
     if (!payload || !payload.owner) return;
     const owner = payload.owner;
     if (!isVeniceOwner(ctx, owner)) return;
-    syncGameRef6(ctx);
+    syncGameRef5(ctx);
     const nation = ctx.ownerNation(owner);
     let bonus = 0;
     const ports = ownerShipyards(ctx, owner).length;
@@ -3095,15 +2911,15 @@
       payload.amount += bonus;
     }
   }
-  function onTurnStart6(ctx, payload) {
+  function onTurnStart5(ctx, payload) {
     const owner = payload && payload.owner;
     const initial = !!(payload && payload.initial);
-    syncGameRef6(ctx);
+    syncGameRef5(ctx);
     if (!isVeniceOwner(ctx, owner)) return;
     if (!initial && ctx.ownerNation(owner) === "veniceCore") {
       maybePortProduction(ctx, owner);
     }
-    if (owner === "player") {
+    if (owner === "player" || isAiOwner(owner)) {
       requestRouteDecision(ctx, owner);
       requestLoanDecision(ctx, owner);
       requestMercenaryDecision(ctx, owner);
@@ -3126,14 +2942,17 @@
   function requestRouteDecision(ctx, owner) {
     if (!isVeniceOwner(ctx, owner)) return null;
     if (routesOf(ctx, owner).length >= TRADE_ROUTE.maxRoutes) return null;
-    const cands = routeCandidates(ctx, owner);
-    if (!cands.length) return null;
-    const options = [{ id: "none", label: "不建", description: "保留金币，不建立贸易路线。" }];
-    cands.forEach((c, idx) => {
+    const cands = routeCandidates(ctx, owner).map((c) => {
       const risk = c.path.filter((p) => {
         const u = ctx.getUnit(p.x, p.y);
         return u && !ctx.areAllies(ctx.game.teams, u.owner, owner);
       }).length;
+      return { ...c, risk };
+    });
+    if (!cands.length) return null;
+    const options = [{ id: "none", label: "不建", description: "保留金币，不建立贸易路线。" }];
+    cands.forEach((c, idx) => {
+      const risk = c.risk;
       options.push({
         id: `route:${idx}`,
         label: `${c.a.label} ↔ ${c.b.label}`,
@@ -3142,6 +2961,10 @@
     });
     return ctx.requestDecision(`venRoute_${owner}`, {
       owner,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
+      // 阶段6 F1：结构化候选数据（收益/风险/路径长度），AI 决策系统据此择优
+      cands: cands.map((c) => ({ income: c.income, risk: c.risk, sea: c.sea, pathLen: c.path.length })),
       title: "贸易路线",
       description: "选择两座己方节点建立贸易路线（无直接成本，但可被敌军切断；海路需己方海军保护）。",
       options,
@@ -3169,6 +2992,8 @@
     ];
     return ctx.requestDecision(`venLoan_${owner}`, {
       owner,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
       title: "热那亚银行信用",
       description: "花未来收入换当前现金——这是借贷/投资决策，请判断是否值得承担还款压力。",
       options,
@@ -3200,6 +3025,8 @@
     }
     return ctx.requestDecision(`venMerc_${owner}`, {
       owner,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
       title: "雇佣兵市场",
       description: `按当前战场购买"临时解决方案"（部署于 ${market.name || "市场"}${market.x},${market.y}）。`,
       options,
@@ -3259,6 +3086,8 @@
     });
     return ctx.requestDecision(`venPort_${owner}`, {
       owner,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
       title: "拉古萨中立商港",
       description: "拉古萨商队已抵达敌方港口，可将其变为交易港（不占领，可被敌军摧毁/重占）。",
       options,
@@ -3300,20 +3129,826 @@
     }
   }
 
+  // src/ai/veniceAi.js
+  var LOAN_AT_GOLD = 20;
+  var MERC_GOLD_MIN = 60;
+  var MERC_RESERVE = 15;
+  var MERC_ENEMY_RANGE = 12;
+  var MERC_CAV_NEED = 2;
+  function selectVenRoute(decisionId, context) {
+    const cands = context && Array.isArray(context.cands) ? context.cands : [];
+    if (!cands.length) return "none";
+    let best = 0;
+    for (let i = 1; i < cands.length; i++) {
+      const a = cands[best];
+      const b = cands[i];
+      const incomeA = a.income || 0;
+      const incomeB = b.income || 0;
+      const riskA = a.risk || 0;
+      const riskB = b.risk || 0;
+      const lenA = a.pathLen || 0;
+      const lenB = b.pathLen || 0;
+      if (incomeB > incomeA || incomeB === incomeA && riskB < riskA || incomeB === incomeA && riskB === riskA && lenB < lenA) {
+        best = i;
+      }
+    }
+    return `route:${best}`;
+  }
+  function selectVenLoan(decisionId, context) {
+    const { ctx, owner } = context || {};
+    if (!ctx || !ctx.game) return "none";
+    const gold = ctx.game.goldByOwner[owner] || 0;
+    return gold < LOAN_AT_GOLD ? "loan" : "none";
+  }
+  function selectVenMerc(decisionId, context) {
+    const { ctx, owner, options } = context || {};
+    if (!ctx || !ctx.game || !Array.isArray(options)) return "none";
+    const gold = ctx.game.goldByOwner[owner] || 0;
+    if (gold < MERC_GOLD_MIN) return "none";
+    let enemyCav = 0;
+    for (const u of ctx.game.units) {
+      if (u.owner === owner || u.owner === "neutral") continue;
+      if (ctx.areAllies(ctx.game.teams, u.owner, owner)) continue;
+      const meta = ctx.typeMeta(u.type);
+      if (meta && meta.charge) enemyCav += 1;
+    }
+    let atWar = false;
+    for (const u of ctx.game.units) {
+      if (u.owner !== owner) continue;
+      if (enemyCountNear(ctx, owner, u.x, u.y, MERC_ENEMY_RANGE) > 0) {
+        atWar = true;
+        break;
+      }
+    }
+    const costOf = (id) => {
+      const d = MERCENARY.options.find((o) => o.id === id);
+      return d ? Math.round(d.baseCost * MERCENARY.markup) : Infinity;
+    };
+    if (enemyCav >= MERC_CAV_NEED) {
+      const id = "spearman";
+      if (options.some((o) => o.id === `merc:${id}`) && gold - costOf(id) >= MERC_RESERVE) return `merc:${id}`;
+    }
+    if (atWar) {
+      const id = "crossbow";
+      if (options.some((o) => o.id === `merc:${id}`) && gold - costOf(id) >= MERC_RESERVE) return `merc:${id}`;
+    }
+    return "none";
+  }
+  function selectVenPort(decisionId, context) {
+    const options = context && Array.isArray(context.options) ? context.options : [];
+    const port = options.find((o) => typeof o.id === "string" && o.id.startsWith("port:"));
+    return port ? port.id : "none";
+  }
+  function registerVeniceAi(register) {
+    register("venRoute_", selectVenRoute);
+    register("venLoan_", selectVenLoan);
+    register("venMerc_", selectVenMerc);
+    register("venPort_", selectVenPort);
+  }
+
+  // src/ai/mamlukAi.js
+  var TACTIC_ENEMY_RANGE = 4;
+  function selectMlV3(decisionId, context) {
+    const { ctx, unitId, options } = context || {};
+    if (!ctx || !ctx.game) return "charge";
+    const unit2 = ctx.game.units.find((u) => u.id === unitId);
+    const meta = unit2 ? ctx.typeMeta(unit2.type) : null;
+    const choice = meta && meta.charge ? "charge" : "swift";
+    return Array.isArray(options) && options.some((o) => o.id === choice) ? choice : "charge";
+  }
+  function selectMlTactic(decisionId, context) {
+    const { ctx, owner, options } = context || {};
+    if (!ctx || !ctx.game) return "defensive";
+    const scholar = ctx.game.units.find((u) => u.owner === owner && u.type === "caliphScholar");
+    const threat = scholar ? enemyCountNear(ctx, owner, scholar.x, scholar.y, TACTIC_ENEMY_RANGE) : 0;
+    const choice = threat >= 1 ? "defensive" : "offensive";
+    return Array.isArray(options) && options.some((o) => o.id === choice) ? choice : "defensive";
+  }
+  function registerMamlukAi(register) {
+    register("mlV3_", selectMlV3);
+    register("mlTactic_", selectMlTactic);
+  }
+
+  // src/factions/ming/engineering.js
+  var ENGINEERING = {
+    turret: {
+      id: "turret",
+      label: "炮台",
+      cost: 20,
+      hp: 10,
+      duration: null,
+      range: 2,
+      atk: 2,
+      def: 1,
+      desc: "每回合对范围内敌方单位造成 2 点火力打击；范围内己方单位被攻击时伤害 -1"
+    },
+    watchtower: {
+      id: "watchtower",
+      label: "瞭望塔",
+      cost: 14,
+      hp: 6,
+      duration: null,
+      range: 2,
+      desc: "范围内火力区进入伤害 +1、交叉火力加成 +1（视野效果降级，见已知问题）"
+    },
+    supplyDepot: {
+      id: "supplyDepot",
+      label: "补给站",
+      cost: 18,
+      hp: 8,
+      duration: null,
+      range: 2,
+      heal: 2,
+      desc: "每回合为范围内己方单位回复 2 点生命"
+    },
+    mingTrench: {
+      id: "mingTrench",
+      label: "壕沟",
+      cost: 16,
+      hp: 12,
+      duration: null,
+      desc: "壕沟上的单位免受冲锋加成（最多减免 2 点）"
+    },
+    bridge: {
+      id: "bridge",
+      label: "临时桥",
+      cost: 12,
+      hp: 10,
+      duration: 3,
+      moveCostMod: -1,
+      desc: "桥格地形移动成本 -1（持续 3 回合，敌我单位均可利用）"
+    }
+  };
+  var state7 = {
+    lastGameRef: null,
+    // 换局检测
+    deployedThisTurn: /* @__PURE__ */ new Set()
+    // unitId：本回合已请求过部署决策（去重）
+  };
+  function resetState6() {
+    state7.deployedThisTurn.clear();
+  }
+  function syncGameRef6(ctx) {
+    if (ctx && ctx.game !== state7.lastGameRef) {
+      resetState6();
+      state7.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests6() {
+    resetState6();
+    state7.lastGameRef = null;
+  }
+  function isMingOwner(ctx, owner) {
+    return !!owner && ctx.ownerFaction(owner) === "ming";
+  }
+  function isEngineerUnit(ctx, unit2) {
+    return !!unit2 && isMingOwner(ctx, unit2.owner) && unit2.type === "worksEngineer";
+  }
+  function inRange(a, b, range) {
+    return Math.abs(a.x - b.x) <= range && Math.abs(a.y - b.y) <= range;
+  }
+  function isLandCell3(ctx, x, y) {
+    const g = ctx.game;
+    if (!g || x < 0 || y < 0 || x >= g.w || y >= g.h) return false;
+    const t = g.terrain[y] && g.terrain[y][x];
+    return !!t && t !== "water" && t !== "mountain";
+  }
+  function canBuildAt2(ctx, unit2, type) {
+    const def = ENGINEERING[type];
+    if (!def) return false;
+    if (!isEngineerUnit(ctx, unit2)) return false;
+    if (!isLandCell3(ctx, unit2.x, unit2.y)) return false;
+    if (ctx.getSite(unit2.x, unit2.y)) return false;
+    const existing = ctx.getFacilityAt(unit2.x, unit2.y);
+    if (existing && existing.type !== "fireZone") return false;
+    if ((ctx.game.goldByOwner[unit2.owner] || 0) < def.cost) return false;
+    return true;
+  }
+  function deployOptionsFor(ctx, unit2) {
+    const options = [{ id: "none", label: "不建", description: "保留金币与本回合行动，不部署设施。" }];
+    if (!isEngineerUnit(ctx, unit2)) return options;
+    const gold = ctx.game.goldByOwner[unit2.owner] || 0;
+    for (const key of ["turret", "watchtower", "supplyDepot", "mingTrench", "bridge"]) {
+      const d = ENGINEERING[key];
+      if (gold >= d.cost) {
+        options.push({ id: d.id, label: `部署${d.label}`, description: `${d.desc}（${d.cost}金币，${d.duration == null ? "持久" : d.duration + "回合"}）` });
+      }
+    }
+    return options;
+  }
+  function requestDeployDecision(ctx, unit2) {
+    if (!unit2 || !isEngineerUnit(ctx, unit2)) return null;
+    if (state7.deployedThisTurn.has(unit2.id)) return null;
+    if (!isLandCell3(ctx, unit2.x, unit2.y)) return null;
+    if (ctx.getSite(unit2.x, unit2.y)) return null;
+    const existing = ctx.getFacilityAt(unit2.x, unit2.y);
+    if (existing && existing.type !== "fireZone") return null;
+    if ((ctx.game.goldByOwner[unit2.owner] || 0) < ENGINEERING.turret.cost) return null;
+    const options = deployOptionsFor(ctx, unit2);
+    if (options.length <= 1) return null;
+    state7.deployedThisTurn.add(unit2.id);
+    const owner = unit2.owner;
+    const unitId = unit2.id;
+    const decisionId = `mgEng_${unitId}`;
+    return ctx.requestDecision(decisionId, {
+      owner,
+      unitId,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
+      title: "工程部署",
+      description: `${ctx.typeMeta(unit2.type).name}可在此格部署工程设施（消耗本回合行动并花费金币）。`,
+      options,
+      onResolve: (choiceId) => {
+        resolveDeploy(ctx, owner, unitId, choiceId);
+      }
+    });
+  }
+  function resolveDeploy(ctx, owner, unitId, choiceId) {
+    const unit2 = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit2 || unit2.owner !== owner) return false;
+    if (!choiceId || choiceId === "none") return false;
+    const def = ENGINEERING[choiceId];
+    if (!def) return false;
+    if (!canBuildAt2(ctx, unit2, choiceId)) {
+      ctx.log(`${ctx.typeMeta(unit2.type).name}无法在此格部署${def.label}（条件不再满足）。`, "warning");
+      return false;
+    }
+    if (!ctx.spendGold(owner, def.cost)) return false;
+    ctx.createFacility(choiceId, owner, unit2.x, unit2.y, {
+      hp: def.hp,
+      duration: def.duration,
+      data: { ...typeof def.moveCostMod === "number" ? { moveCostMod: def.moveCostMod } : {} }
+    });
+    unit2.acted = true;
+    unit2.move = 0;
+    unit2.hasAttacked = true;
+    ctx.log(`${ctx.typeMeta(unit2.type).name}在（${unit2.x},${unit2.y}）部署了${def.label}。`, "system");
+    return true;
+  }
+  var FACILITY_CHIP_RATIO2 = 0.5;
+  function onAfterAttack5(ctx, payload) {
+    const { attacker, defender, result } = payload || {};
+    if (!attacker || !defender || !result) return;
+    if (isMingOwner(ctx, attacker.owner)) return;
+    const fac = ctx.getFacilityAt(defender.x, defender.y);
+    if (!fac || !isMingOwner(ctx, fac.owner)) return;
+    if (fac.type === "fireZone") return;
+    if (ctx.areAllies(ctx.game.teams, attacker.owner, fac.owner)) return;
+    const chip = Math.max(1, Math.round((result.damage || 0) * FACILITY_CHIP_RATIO2));
+    const remaining = ctx.damageFacility(fac.id, chip);
+    const label = ENGINEERING[fac.type]?.label || fac.type;
+    if (remaining <= 0) {
+      ctx.log(`${label}在战火中被摧毁。`, "warning");
+    } else {
+      ctx.log(`${label}受到攻击受损（耐久 ${remaining}/${fac.maxHp}）。`, "warning");
+    }
+  }
+  function onTurnStart6(ctx, payload) {
+    const owner = payload && payload.owner;
+    const initial = !!(payload && payload.initial);
+    syncGameRef6(ctx);
+    if (!isMingOwner(ctx, owner)) return;
+    state7.deployedThisTurn.clear();
+    if (!initial) {
+      const facilities2 = ctx.getFacilitiesByOwner(owner);
+      for (const f of facilities2) {
+        if (f.type !== "turret") continue;
+        const def = ENGINEERING.turret;
+        for (const u of ctx.game.units) {
+          if (u.owner === owner) continue;
+          if (ctx.areAllies(ctx.game.teams, u.owner, owner)) continue;
+          if (!inRange(u, f, def.range)) continue;
+          if (u.hp <= 1) continue;
+          u.hp = Math.max(1, u.hp - def.atk);
+          ctx.log(`${def.label}轰击${ctx.typeMeta(u.type).name}，造成 ${def.atk} 点伤害（剩余 ${u.hp} HP）。`, "battle");
+        }
+      }
+      for (const f of facilities2) {
+        if (f.type !== "supplyDepot") continue;
+        const def = ENGINEERING.supplyDepot;
+        for (const u of ctx.game.units) {
+          if (u.owner !== owner) continue;
+          if (u.hp >= u.maxHp) continue;
+          if (!inRange(u, f, def.range)) continue;
+          u.hp = Math.min(u.maxHp, u.hp + def.heal);
+          ctx.log(`${def.label}为${ctx.typeMeta(u.type).name}补给，回复 ${def.heal} 点生命。`, "battle");
+        }
+      }
+    }
+    if (owner === "player" || isAiOwner(owner)) {
+      for (const unit2 of ctx.game.units) {
+        if (unit2.owner !== owner) continue;
+        requestDeployDecision(ctx, unit2);
+      }
+    }
+  }
+  function onBeforeAttack3(ctx, payload) {
+    const { attacker, defender, fromCell, toCell, result, isCounter } = payload || {};
+    if (!attacker || !defender || !result || !result.damage) return;
+    syncGameRef6(ctx);
+    const fac = ctx.getFacilityAt(defender.x, defender.y);
+    if (fac && fac.type === "mingTrench" && isMingOwner(ctx, fac.owner)) {
+      if (isCharging2(ctx, attacker, fromCell, toCell, isCounter, defender)) {
+        const atkMeta = ctx.typeMeta(attacker.type);
+        const chargeVal = (atkMeta.charge || 0) + (ctx.ownerNation(attacker.owner) === "austria" ? 1 : 0);
+        if (chargeVal > 0) {
+          result.damage = Math.max(1, result.damage - Math.min(chargeVal, 2));
+          ctx.log(`${ctx.typeMeta(attacker.type).name}的冲锋被壕沟阻挡，伤害 -${Math.min(chargeVal, 2)}。`, "battle");
+        }
+      }
+    }
+    if (isMingOwner(ctx, defender.owner)) {
+      const turrets = ctx.getFacilitiesByType("turret").filter((f) => isMingOwner(ctx, f.owner) && inRange(defender, f, ENGINEERING.turret.range));
+      if (turrets.length) {
+        result.damage = Math.max(1, result.damage - ENGINEERING.turret.def);
+      }
+    }
+  }
+  function isCharging2(ctx, attacker, fromCell, toCell, isCounter, defender) {
+    if (isCounter) return false;
+    if (!attacker || attacker.move !== attacker.maxMove) return false;
+    const meta = ctx.typeMeta(attacker.type);
+    if (!meta || !meta.charge) return false;
+    if (defender && defender.type === "pikeSquare") return false;
+    const from = fromCell || { x: attacker.x, y: attacker.y };
+    const to = toCell || { x: attacker.x, y: attacker.y };
+    return ctx.diagonalDist(from, to) === 1;
+  }
+  function attachDebug3(ctx) {
+    const debug = {
+      config: () => ({ ...ENGINEERING }),
+      facilities: () => ctx.getAllFacilities().map((f) => ({ id: f.id, type: f.type, owner: f.owner, x: f.x, y: f.y, hp: f.hp, maxHp: f.maxHp, duration: f.duration, data: f.data })),
+      state: () => ({ deployedThisTurn: [...state7.deployedThisTurn] }),
+      // 为某 owner 所有工部工程师发起部署决策（返回请求数）
+      requestForOwner: (owner) => {
+        let n = 0;
+        for (const u of ctx.game.units) {
+          if (u.owner === owner && requestDeployDecision(ctx, u)) n += 1;
+        }
+        return n;
+      },
+      pending: (owner) => ctx.getPendingDecisions(owner || "player").filter((r) => String(r.id || "").startsWith("mgEng_")).map((r) => ({ id: r.id, unitId: r.context.unitId, options: r.context.options.map((o) => o.id) })),
+      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId)
+    };
+    if (typeof globalThis !== "undefined") globalThis.__mingDebug = { ...globalThis.__mingDebug || {}, engineering: debug };
+    return debug;
+  }
+
+  // src/ai/mingAi.js
+  var TURRET_ENEMY_RANGE = 6;
+  var WOUNDED_RANGE = 3;
+  var WOUNDED_NEED = 2;
+  var GOLD_RESERVE2 = 12;
+  function selectMgEng(decisionId, context) {
+    const { ctx, owner, unitId, options } = context || {};
+    if (!ctx || !ctx.game || !Array.isArray(options)) return "none";
+    const unit2 = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit2 || unit2.owner !== owner) return "none";
+    const gold = ctx.game.goldByOwner[owner] || 0;
+    const have = (id) => options.some((o) => o.id === id);
+    const affordable = (id) => {
+      const def = ENGINEERING[id];
+      return !!def && gold - def.cost >= GOLD_RESERVE2;
+    };
+    if (have("turret") && affordable("turret") && enemyCountNear(ctx, owner, unit2.x, unit2.y, TURRET_ENEMY_RANGE) > 0) {
+      return "turret";
+    }
+    if (have("supplyDepot") && affordable("supplyDepot") && ownWoundedNear(ctx, owner, unit2.x, unit2.y, WOUNDED_RANGE) >= WOUNDED_NEED) {
+      return "supplyDepot";
+    }
+    if (have("bridge") && affordable("bridge") && waterAdjacent(ctx, unit2)) {
+      return "bridge";
+    }
+    if (have("watchtower") && affordable("watchtower")) return "watchtower";
+    return "none";
+  }
+  function waterAdjacent(ctx, unit2) {
+    const g = ctx.game;
+    if (!g || !g.terrain) return false;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = unit2.x + dx;
+        const y = unit2.y + dy;
+        if (x < 0 || y < 0 || x >= g.w || y >= g.h) continue;
+        if (g.terrain[y] && g.terrain[y][x] === "water") return true;
+      }
+    }
+    return false;
+  }
+  function registerMingAi(register) {
+    register("mgEng_", selectMgEng);
+  }
+
+  // src/ai/aiDecisions.js
+  var decisioners = /* @__PURE__ */ new Map();
+  function registerAiDecision(prefix, fn) {
+    decisioners.set(prefix, fn);
+  }
+  function select(decisionId, context) {
+    const id = String(decisionId || "");
+    let bestPrefix = null;
+    let bestFn = null;
+    for (const [prefix, fn] of decisioners) {
+      if (id.startsWith(prefix) && (bestPrefix === null || prefix.length > bestPrefix.length)) {
+        bestPrefix = prefix;
+        bestFn = fn;
+      }
+    }
+    if (!bestFn) return null;
+    try {
+      const choiceId = bestFn(id, context);
+      if (choiceId != null && Array.isArray(context && context.options) && context.options.some((o) => o && o.id === choiceId)) {
+        return choiceId;
+      }
+      return null;
+    } catch (e) {
+      console.error(`[ai:decision] ${id} error:`, e);
+      return null;
+    }
+  }
+  registerHreAi(registerAiDecision);
+  registerGoldenHordeAi(registerAiDecision);
+  registerVeniceAi(registerAiDecision);
+  registerMamlukAi(registerAiDecision);
+  registerMingAi(registerAiDecision);
+
+  // src/core/decision.js
+  var pending = /* @__PURE__ */ new Map();
+  var nextDecisionId = 1;
+  function hasUI() {
+    return typeof document !== "undefined" && typeof window !== "undefined";
+  }
+  var decisionSystem = {
+    requestDecision(decisionId, context) {
+      const id = decisionId || `dec_${nextDecisionId++}`;
+      const record = { id, context, resolved: false, choiceId: null };
+      pending.set(id, record);
+      const aiOwner = isAiOwner(context.owner);
+      if (aiOwner || !hasUI()) {
+        let choiceId = null;
+        if (aiOwner) {
+          const aiChoice = select(id, context);
+          if (aiChoice != null) {
+            choiceId = aiChoice;
+            console.log(`[decision:ai-resolve] ${id} → ${choiceId} (AI decision)`);
+          } else {
+            const choice = context.options && context.options[0];
+            choiceId = choice ? choice.id : null;
+            console.log(`[decision:auto-resolve] ${id} → ${choiceId} (test fallback, no AI decisioner)`);
+          }
+        } else {
+          const choice = context.options && context.options[0];
+          choiceId = choice ? choice.id : null;
+          console.log(`[decision:auto-resolve] ${id} → ${choiceId} (test fallback, not a game rule)`);
+        }
+        this.resolveDecision(id, choiceId);
+      }
+      return record;
+    },
+    resolveDecision(decisionId, choiceId) {
+      const record = pending.get(decisionId);
+      if (!record || record.resolved) return false;
+      record.resolved = true;
+      record.choiceId = choiceId;
+      pending.delete(decisionId);
+      if (typeof record.context.onResolve === "function") {
+        try {
+          record.context.onResolve(choiceId);
+        } catch (e) {
+          console.error(`[decision] onResolve error (${decisionId}):`, e);
+        }
+      }
+      return true;
+    },
+    cancelDecision(decisionId) {
+      const record = pending.get(decisionId);
+      if (!record || record.resolved) return false;
+      record.resolved = true;
+      pending.delete(decisionId);
+      if (typeof record.context.onCancel === "function") {
+        try {
+          record.context.onCancel();
+        } catch (e) {
+          console.error(`[decision] onCancel error (${decisionId}):`, e);
+        }
+      }
+      return true;
+    },
+    getPendingDecisions(owner) {
+      return [...pending.values()].filter((r) => r.context.owner === owner && !r.resolved);
+    },
+    getDecision(decisionId) {
+      return pending.get(decisionId) || null;
+    },
+    clear() {
+      pending.clear();
+    }
+  };
+
+  // src/factions/factionContext.js
+  function createFactionContext(deps) {
+    return {
+      // —— 只读查询 ——
+      get game() {
+        return deps.gameRef();
+      },
+      getUnit: deps.getUnit,
+      getSite: deps.getSite,
+      getFacilityAt: (x, y) => facilitySystem.getFacilityAt(x, y),
+      typeMeta: deps.typeMeta,
+      terrainMeta: deps.terrainMeta,
+      ownerFaction: deps.ownerFaction,
+      ownerNation: deps.ownerNation,
+      hasStatus: (unitId, key) => statusSystem.hasStatus(unitId, key),
+      // —— 设施维护/查询（v1.1 补全：联盟系统不得直接 import facility.js） ——
+      createFacility: (type, owner, x, y, opts) => facilitySystem.createFacility(type, owner, x, y, opts),
+      removeFacility: (id) => facilitySystem.removeFacility(id),
+      damageFacility: (id, amount) => facilitySystem.damageFacility(id, amount),
+      expireFacilities: (owner) => facilitySystem.expireFacilities(owner),
+      getFacilitiesByOwner: (owner) => facilitySystem.getFacilitiesByOwner(owner),
+      getFacilitiesByType: (type) => facilitySystem.getFacilitiesByType(type),
+      getFacilitiesInRange: (x, y, range) => facilitySystem.getFacilitiesInRange(x, y, range),
+      getAllFacilities: () => facilitySystem.getAll(),
+      // —— 决策查询（v1.1 补全：debug/UI 用，不在 UI 层直接 import decision.js） ——
+      getPendingDecisions: (owner) => decisionSystem.getPendingDecisions(owner),
+      // —— 纯函数转发（v1.1：联盟系统无需 import core 纯函数） ——
+      diagonalDist: (a, b) => diagonalDist(a, b),
+      movementCost: (game, unitEntry, x, y) => movementCost(game, unitEntry, x, y),
+      areAllies: (teams, a, b) => areAllies(teams, a, b),
+      // —— 单位创建（v1.2：GH-02，委托 main.js 闭包 unit() 工厂；不做金币/上限/位置校验，业务由调用方自查） ——
+      createUnit: (type, owner, x, y) => deps.createUnit(type, owner, x, y),
+      // —— 安全动作（不改变战斗流程） ——
+      log: deps.log,
+      addGold: deps.addGold,
+      spendGold: deps.spendGold,
+      addStatus: (unitId, key, turns, data) => statusSystem.addStatus(unitId, key, turns, data),
+      removeStatus: (unitId, key) => statusSystem.removeStatus(unitId, key),
+      // —— 主动决策 ——
+      requestDecision: (decisionId, context) => decisionSystem.requestDecision(decisionId, context),
+      resolveDecision: (decisionId, choiceId) => decisionSystem.resolveDecision(decisionId, choiceId),
+      // —— 事件总线（联盟系统可自行订阅额外事件） ——
+      events: eventBus
+    };
+  }
+
+  // src/factions/factionRegistry.js
+  var systems = /* @__PURE__ */ new Map();
+  var HOOK_TO_EVENT = {
+    onTurnStart: "turnStart",
+    onTurnEnd: "turnEnd",
+    onBeforeMove: "beforeMove",
+    onAfterMove: "afterMove",
+    onBeforeAttack: "beforeAttack",
+    onAfterAttack: "afterAttack",
+    onUnitCreated: "unitCreated",
+    onUnitKilled: "unitKilled",
+    onSiteCaptured: "siteCaptured",
+    onIncomeCalculated: "incomeCalculated",
+    onProductionCompleted: "productionCompleted"
+  };
+  var REGISTER_ORDER = ["hre", "goldenHorde", "venice", "mamluk", "ming"];
+  var factionRegistry = {
+    register(factionId, system, ctx) {
+      if (!REGISTER_ORDER.includes(factionId)) {
+        console.error(`[factionRegistry] unknown factionId: ${factionId}`);
+        return;
+      }
+      system.id = factionId;
+      systems.set(factionId, system);
+      if (typeof system.init === "function") {
+        try {
+          system.init(ctx);
+        } catch (e) {
+          console.error(`[factionRegistry] ${factionId}.init error:`, e);
+        }
+      }
+      for (const [hook, event] of Object.entries(HOOK_TO_EVENT)) {
+        if (typeof system[hook] === "function") {
+          eventBus.on(event, (payload) => {
+            try {
+              system[hook](ctx, payload);
+            } catch (e) {
+              console.error(`[factionRegistry] ${factionId}.${hook} error:`, e);
+            }
+          });
+        }
+      }
+    },
+    unregister(factionId) {
+      systems.delete(factionId);
+    },
+    get(factionId) {
+      return systems.get(factionId) || null;
+    },
+    getAll() {
+      return new Map(systems);
+    },
+    getRegisteredOrder() {
+      return REGISTER_ORDER.filter((id) => systems.has(id));
+    },
+    isRegistered(factionId) {
+      return systems.has(factionId);
+    },
+    clear() {
+      systems.clear();
+    }
+  };
+
+  // src/factions/hre/nationMechanics.js
+  var HRE_NATION = {
+    prussiaFormationMove: 1,
+    // 军阵协同：首次移动消耗 -1（预支移动力）
+    bavariaHillDefense: 1
+    // 山地防线：丘陵受击伤害 -1
+  };
+  var state8 = {
+    lastGameRef: null,
+    prussiaFormationUsed: /* @__PURE__ */ new Set()
+    // unitId：本回合已享受军阵协同（每回合重置）
+  };
+  function resetState7() {
+    state8.prussiaFormationUsed.clear();
+  }
+  function syncGameRef7(ctx) {
+    if (ctx && ctx.game !== state8.lastGameRef) {
+      resetState7();
+      state8.lastGameRef = ctx ? ctx.game : null;
+    }
+  }
+  function resetForTests7() {
+    resetState7();
+    state8.lastGameRef = null;
+  }
+  function hasFriendlyAdjacent(ctx, unit2) {
+    for (const other of ctx.game.units) {
+      if (other === unit2) continue;
+      if (!ctx.areAllies(ctx.game.teams, unit2.owner, other.owner)) continue;
+      if (Math.abs(other.x - unit2.x) <= 1 && Math.abs(other.y - unit2.y) <= 1) return true;
+    }
+    return false;
+  }
+  function onTurnStart7(ctx, payload) {
+    syncGameRef7(ctx);
+    state8.prussiaFormationUsed.clear();
+  }
+  function onBeforeMove4(ctx, payload) {
+    const { unit: unit2 } = payload || {};
+    if (!unit2) return;
+    syncGameRef7(ctx);
+    if (ctx.ownerNation(unit2.owner) !== "prussia") return;
+    if (unit2.move <= 0) return;
+    if (state8.prussiaFormationUsed.has(unit2.id)) return;
+    if (!hasFriendlyAdjacent(ctx, unit2)) return;
+    state8.prussiaFormationUsed.add(unit2.id);
+    unit2.move = unit2.move + HRE_NATION.prussiaFormationMove;
+    ctx.log(`${ctx.typeMeta(unit2.type).name}与友军列阵协同推进，本次移动消耗 -1。`, "system");
+  }
+  function onBeforeAttack4(ctx, payload) {
+    const { defender, result } = payload || {};
+    if (!defender || !result || !result.damage) return;
+    syncGameRef7(ctx);
+    if (ctx.ownerNation(defender.owner) !== "bavaria") return;
+    const g = ctx.game;
+    if (!g.terrain || !g.terrain[defender.y]) return;
+    if (g.terrain[defender.y][defender.x] !== "hill") return;
+    result.damage = Math.max(1, result.damage - HRE_NATION.bavariaHillDefense);
+    ctx.log(`${ctx.typeMeta(defender.type).name}依托山地防线固守，受击伤害 -1。`, "battle");
+  }
+  function attachDebug4(ctx) {
+    const debug = {
+      config: () => ({ ...HRE_NATION }),
+      state: () => ({ prussiaFormationUsed: [...state8.prussiaFormationUsed] })
+    };
+    if (typeof globalThis !== "undefined") globalThis.__hreDebug = { ...globalThis.__hreDebug || {}, nations: debug };
+    return debug;
+  }
+
+  // src/factions/hre/hreRules.js
+  var hreSystem = {
+    id: "hre",
+    // 注册时调用一次：挂载 debug/test 入口（globalThis.__hreDebug，浏览器控制台可用）
+    init(ctx) {
+      attachDebug(ctx);
+      attachDebug4(ctx);
+    },
+    // turnStart：工事过期、阵线检测/耐久/回血/状态、每回合追踪重置、人类玩家建造决策
+    onTurnStart(ctx, payload) {
+      onTurnStart(ctx, payload);
+      onTurnStart7(ctx, payload);
+    },
+    // beforeMove：木栅移动税 + 普鲁士军阵协同（需主对话在 moveUnit 内补 emit 'beforeMove'，见交付报告已知问题）
+    onBeforeMove(ctx, payload) {
+      onBeforeMove(ctx, payload);
+      onBeforeMove4(ctx, payload);
+    },
+    // beforeAttack：三种工事效果 + 4 个兵种联动 + 巴伐利亚山地防线（只改 result.damage）
+    onBeforeAttack(ctx, payload) {
+      onBeforeAttack(ctx, payload);
+      onBeforeAttack4(ctx, payload);
+    },
+    // afterAttack：工事可被攻击摧毁（按伤害比例受损）
+    onAfterAttack(ctx, payload) {
+      onAfterAttack(ctx, payload);
+    },
+    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
+    reset() {
+      resetForTests();
+      resetForTests7();
+    }
+  };
+
+  // src/factions/goldenHorde/goldenHordeRules.js
+  var goldenHordeSystem = {
+    id: "goldenHorde",
+    // 注册时调用一次：挂载 debug/test 入口（globalThis.__goldenHordeDebug，浏览器控制台可用）
+    init(ctx) {
+      attachDebug5(ctx);
+      attachDebug2(ctx);
+    },
+    // turnStart：先无条件重置掠袭去重标记（raided 作用于被打方，所有 owner 回合都要清），
+    // 再处理营地过期/维护/决策（内部判断金帐 owner）+ 国家机制（首攻标记重置/绿洲回血）。
+    onTurnStart(ctx, payload) {
+      onTurnStart2(ctx, payload);
+      onTurnStart4(ctx, payload);
+      onTurnStart3(ctx, payload);
+    },
+    // beforeMove：raided 移动力 -1（预扣；付不起则 cancel）+ 国家机制（无 beforeMove 项）
+    onBeforeMove(ctx, payload) {
+      onBeforeMove2(ctx, payload);
+    },
+    // beforeAttack：国家机制（可汗威望骑兵首攻/绿洲对骑兵/蓝帐伏击首攻，只改 result.damage）
+    onBeforeAttack(ctx, payload) {
+      onBeforeAttack2(ctx, payload);
+    },
+    // afterAttack：掠袭收益（击杀战利品）+ raided 标记（未击杀）+ 国家机制（威望/绿洲/撤离）
+    onAfterAttack(ctx, payload) {
+      onAfterAttack2(ctx, payload);
+      onAfterAttack3(ctx, payload);
+    },
+    // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
+    reset() {
+      resetForTests2();
+      resetForTests4();
+      resetForTests3();
+    }
+  };
+  function attachDebug5(ctx) {
+    const debug = {
+      config: () => ({
+        raidLoot: { ...RAID_LOOT },
+        raidPower: { moveMin: RAID_POWER_MOVE_MIN, levelMin: RAID_POWER_LEVEL_MIN, raidedTurns: RAIDED_TURNS },
+        camp: { ...NOMAD_CAMP },
+        producible: [...CAMP_PRODUCIBLE]
+      }),
+      // 当前所有游牧营地
+      camps: () => ctx.getFacilitiesByType(NOMAD_CAMP.type).map((f) => ({
+        id: f.id,
+        owner: f.owner,
+        x: f.x,
+        y: f.y,
+        duration: f.duration,
+        data: f.data,
+        occupant: ctx.getUnit(f.x, f.y) ? ctx.getUnit(f.x, f.y).type : null
+      })),
+      // 当前所有带 raided 标记的单位
+      raided: () => ctx.game.units.filter((u) => ctx.hasStatus(u.id, RAIDED_KEY)).map((u) => ({ id: u.id, type: u.type, owner: u.owner, x: u.x, y: u.y })),
+      state: () => ({ ...debugState() }),
+      // 查看某 owner 可建营地的单位
+      eligible: (owner) => ctx.game.units.filter((u) => u.owner === owner && canBuildCampAt(ctx, u)).map((u) => ({ id: u.id, type: u.type, x: u.x, y: u.y })),
+      // 为某 owner 所有可建单位发起建造决策；为所有营地发起行动决策（返回请求数）
+      requestForOwner: (owner) => {
+        let n = 0;
+        for (const u of ctx.game.units) {
+          if (u.owner === owner && requestBuildDecision2(ctx, u)) n += 1;
+        }
+        for (const c of myCamps(ctx, owner)) {
+          if (requestCampDecision(ctx, c)) n += 1;
+        }
+        return n;
+      },
+      // 查看未决金帐决策（浏览器 UI 阶段前的手动测试入口）
+      pending: () => ctx.getPendingDecisions("player").filter((r) => String(r.id || "").startsWith("ghCamp")).map((r) => ({ id: r.id, title: r.context.title, options: r.context.options.map((o) => o.id) })),
+      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId)
+    };
+    if (typeof globalThis !== "undefined") globalThis.__goldenHordeDebug = debug;
+    return debug;
+  }
+
   // src/factions/venice/veniceRules.js
   var veniceSystem = {
     id: "venice",
     // 注册时调用一次：挂载 debug/test 入口（globalThis.__veniceDebug，浏览器控制台可用）
     init(ctx) {
-      attachDebug5(ctx);
+      attachDebug6(ctx);
     },
     // turnStart：被动维护（海上垄断加速生产）+ 玩家决策请求（路线/借贷/雇佣兵/商港）
     onTurnStart(ctx, payload) {
-      onTurnStart6(ctx, payload);
+      onTurnStart5(ctx, payload);
     },
     // beforeMove：敌军单位进入路线路径 → 立即标记切断（收入侧 incomeCalculated 复核）
     onBeforeMove(ctx, payload) {
-      onBeforeMove4(ctx, payload);
+      onBeforeMove3(ctx, payload);
     },
     // afterAttack：敌军攻击交易港格上单位 → 交易港按伤害比例掉耐久
     onAfterAttack(ctx, payload) {
@@ -3329,10 +3964,10 @@
     },
     // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
     reset() {
-      resetForTests6();
+      resetForTests5();
     }
   };
-  function attachDebug5(ctx) {
+  function attachDebug6(ctx) {
     const debug = {
       config: () => ({
         tradeRoute: { ...TRADE_ROUTE },
@@ -3442,7 +4077,7 @@
     moralePenalty: 3
     // 精锐死亡士气损失（与 MORALE.lostPenalty 一致）
   };
-  var state7 = {
+  var state9 = {
     lastGameRef: null,
     // 换局检测
     veterancy: /* @__PURE__ */ new Map(),
@@ -3460,24 +4095,24 @@
     tactic: /* @__PURE__ */ new Map()
     // owner -> 'defensive'|'offensive'|'mobility'|'drill'（巴格达学术指令）
   };
-  function resetState7() {
-    state7.veterancy.clear();
-    state7.morale.clear();
-    state7.fireLine.clear();
-    state7.cavalryFirstHit.clear();
-    state7.mobilityUsed.clear();
-    state7.v3Requested.clear();
-    state7.tactic.clear();
+  function resetState8() {
+    state9.veterancy.clear();
+    state9.morale.clear();
+    state9.fireLine.clear();
+    state9.cavalryFirstHit.clear();
+    state9.mobilityUsed.clear();
+    state9.v3Requested.clear();
+    state9.tactic.clear();
   }
-  function syncGameRef7(ctx) {
-    if (ctx && ctx.game !== state7.lastGameRef) {
-      resetState7();
-      state7.lastGameRef = ctx ? ctx.game : null;
+  function syncGameRef8(ctx) {
+    if (ctx && ctx.game !== state9.lastGameRef) {
+      resetState8();
+      state9.lastGameRef = ctx ? ctx.game : null;
     }
   }
-  function resetForTests7() {
-    resetState7();
-    state7.lastGameRef = null;
+  function resetForTests8() {
+    resetState8();
+    state9.lastGameRef = null;
   }
   function isMamlukOwner(ctx, owner) {
     return !!owner && ctx.ownerFaction(owner) === "mamluk";
@@ -3486,7 +4121,7 @@
     return !!unit2 && VETERANCY.specialUnits.includes(unit2.type);
   }
   function ensureRecord(unit2) {
-    let rec = state7.veterancy.get(unit2.id);
+    let rec = state9.veterancy.get(unit2.id);
     if (!rec) {
       rec = {
         unitId: unit2.id,
@@ -3499,17 +4134,17 @@
         elite: false,
         dead: false
       };
-      state7.veterancy.set(unit2.id, rec);
+      state9.veterancy.set(unit2.id, rec);
     }
     return rec;
   }
   function getMorale(owner) {
-    if (!state7.morale.has(owner)) state7.morale.set(owner, MORALE.init);
-    return state7.morale.get(owner);
+    if (!state9.morale.has(owner)) state9.morale.set(owner, MORALE.init);
+    return state9.morale.get(owner);
   }
   function adjustMorale(owner, delta) {
     const v = Math.max(0, Math.min(100, getMorale(owner) + delta));
-    state7.morale.set(owner, v);
+    state9.morale.set(owner, v);
     return v;
   }
   function nearNile(ctx, unit2) {
@@ -3548,8 +4183,8 @@
       ctx.log(`${ctx.typeMeta(unit2.type).name}晋升为 Veteran 2（防御 +1）。`, "system");
     }
     if (rec.veteranLevel === 2 && rec.xp >= VETERANCY.v3Threshold && !rec.promotion) {
-      if (unit2.owner === "player") {
-        if (!state7.v3Requested.has(unit2.id)) {
+      if (unit2.owner === "player" || isAiOwner(unit2.owner)) {
+        if (!state9.v3Requested.has(unit2.id)) {
           requestV3Decision(ctx, unit2, rec);
         }
       }
@@ -3562,7 +4197,7 @@
   }
   function addXp(ctx, unit2, amount, reason) {
     if (!isSpecialUnit(ctx, unit2)) return;
-    syncGameRef7(ctx);
+    syncGameRef8(ctx);
     const rec = ensureRecord(unit2);
     if (rec.dead) return;
     let xp = amount;
@@ -3578,7 +4213,7 @@
   }
   var V3_OPTION_LABEL = { charge: "冲锋强化", bloodlust: "击杀回血", swift: "移动力强化" };
   function requestV3Decision(ctx, unit2, rec) {
-    state7.v3Requested.add(unit2.id);
+    state9.v3Requested.add(unit2.id);
     const options = [
       { id: "charge", label: "冲锋强化", description: "满移动力发起攻击时伤害 +3。" },
       { id: "bloodlust", label: "击杀回血", description: "击杀单位后回复 2 点生命。" },
@@ -3587,6 +4222,8 @@
     return ctx.requestDecision(`mlV3_${unit2.id}`, {
       owner: unit2.owner,
       unitId: unit2.id,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
       title: "精锐晋升",
       description: `${ctx.typeMeta(unit2.type).name}达到 Veteran 3，选择晋升方向。`,
       options,
@@ -3596,7 +4233,7 @@
     });
   }
   function applyV3Promotion(ctx, unit2, choiceId) {
-    const rec = state7.veterancy.get(unit2.id);
+    const rec = state9.veterancy.get(unit2.id);
     if (!rec || rec.dead) return false;
     if (!["charge", "bloodlust", "swift"].includes(choiceId)) return false;
     rec.promotion = choiceId;
@@ -3623,21 +4260,23 @@
     return ctx.requestDecision(`mlTactic_${owner}_${ctx.game.turn || 0}`, {
       owner,
       unitId: scholar.id,
+      ctx,
+      // 阶段6 F1：供 AI 决策系统查询战场状态
       title: "学术指令",
       description: "哈里发学者每回合可选择一种战术，替代固定光环。",
       options: TACTIC_OPTIONS,
       onResolve: (choiceId) => {
         if (TACTIC_OPTIONS.some((o) => o.id === choiceId)) {
-          state7.tactic.set(owner, choiceId);
+          state9.tactic.set(owner, choiceId);
           ctx.log(`巴格达发布学术指令：${TACTIC_OPTIONS.find((o) => o.id === choiceId).label}。`, "system");
         }
       }
     });
   }
-  function onAfterAttack5(ctx, payload) {
+  function onAfterAttack6(ctx, payload) {
     const { attacker, defender, result, defenderDead, attackerDead } = payload || {};
     if (!attacker || !defender) return;
-    syncGameRef7(ctx);
+    syncGameRef8(ctx);
     const atkIsMamluk = isMamlukOwner(ctx, attacker.owner);
     const defIsMamluk = isMamlukOwner(ctx, defender.owner);
     if (!atkIsMamluk && !defIsMamluk) return;
@@ -3648,7 +4287,7 @@
         addXp(ctx, attacker, VETERANCY.killXp, "kill");
         const dmeta = ctx.typeMeta(defender.type);
         if (dmeta && dmeta.level >= 3) addXp(ctx, attacker, VETERANCY.keyBattleXp, "keyBattle");
-        const rec = state7.veterancy.get(attacker.id);
+        const rec = state9.veterancy.get(attacker.id);
         if (!attackerDead && rec && !rec.dead && rec.promotion === "bloodlust") {
           attacker.hp = Math.min(attacker.maxHp, attacker.hp + VETERANCY.bloodlustHeal);
         }
@@ -3665,7 +4304,7 @@
     }
   }
   function eliteLost(ctx, unit2) {
-    const rec = state7.veterancy.get(unit2.id);
+    const rec = state9.veterancy.get(unit2.id);
     if (!rec || rec.dead || rec.veteranLevel < 3) return;
     const paid = ctx.spendGold(unit2.owner, ELITE_LOST.gold);
     adjustMorale(unit2.owner, -ELITE_LOST.moralePenalty);
@@ -3680,19 +4319,19 @@
   function onSiteCaptured2(ctx, payload) {
     const { unit: unit2 } = payload || {};
     if (!unit2) return;
-    syncGameRef7(ctx);
+    syncGameRef8(ctx);
     if (!isMamlukOwner(ctx, unit2.owner)) return;
     addXp(ctx, unit2, VETERANCY.captureXp, "capture");
   }
-  function onBeforeAttack4(ctx, payload) {
+  function onBeforeAttack5(ctx, payload) {
     const { attacker, defender, result, isCounter } = payload || {};
     if (!attacker || !defender || !result || !result.damage) return;
-    syncGameRef7(ctx);
+    syncGameRef8(ctx);
     const atkMamluk = isMamlukOwner(ctx, attacker.owner);
     const defMamluk = isMamlukOwner(ctx, defender.owner);
     if (!atkMamluk && !defMamluk) return;
     if (atkMamluk) {
-      const rec = state7.veterancy.get(attacker.id);
+      const rec = state9.veterancy.get(attacker.id);
       const morale = getMorale(attacker.owner);
       if (morale <= MORALE.low && (!rec || rec.dead || rec.veteranLevel === 0)) {
         result.damage = Math.max(1, result.damage - MORALE.greenPenalty);
@@ -3703,12 +4342,12 @@
       if (rec && !rec.dead && rec.promotion === "charge" && attacker.move === attacker.maxMove) {
         result.damage += VETERANCY.chargeBonus;
       }
-      if (morale >= MORALE.high && isSpecialUnit(ctx, attacker) && !state7.cavalryFirstHit.has(attacker.id)) {
+      if (morale >= MORALE.high && isSpecialUnit(ctx, attacker) && !state9.cavalryFirstHit.has(attacker.id)) {
         result.damage += MORALE.cavalryFirstHitBonus;
-        state7.cavalryFirstHit.add(attacker.id);
+        state9.cavalryFirstHit.add(attacker.id);
         ctx.log(`${ctx.typeMeta(attacker.type).name}趁高涨士气发起猛攻，伤害 +${MORALE.cavalryFirstHitBonus}。`, "battle");
       }
-      if (ctx.ownerNation(attacker.owner) === "baghdad" && state7.tactic.get(attacker.owner) === "offensive" && hasScholarNearby(ctx, attacker)) {
+      if (ctx.ownerNation(attacker.owner) === "baghdad" && state9.tactic.get(attacker.owner) === "offensive" && hasScholarNearby(ctx, attacker)) {
         result.damage += VETERANCY.tacticOff;
       }
       if (ctx.ownerNation(attacker.owner) === "syria") {
@@ -3716,11 +4355,11 @@
       }
     }
     if (defMamluk) {
-      const drec = state7.veterancy.get(defender.id);
+      const drec = state9.veterancy.get(defender.id);
       if (drec && !drec.dead && drec.veteranLevel >= 2) {
         result.damage = Math.max(1, result.damage - VETERANCY.v2Def);
       }
-      if (ctx.ownerNation(defender.owner) === "baghdad" && state7.tactic.get(defender.owner) === "defensive" && hasScholarNearby(ctx, defender)) {
+      if (ctx.ownerNation(defender.owner) === "baghdad" && state9.tactic.get(defender.owner) === "defensive" && hasScholarNearby(ctx, defender)) {
         result.damage = Math.max(1, result.damage - VETERANCY.tacticDef);
       }
     }
@@ -3728,34 +4367,34 @@
   function applySyriaFocus(ctx, attacker, defender, result) {
     const meta = ctx.typeMeta(attacker.type);
     if (!meta || meta.range <= 1) return;
-    const prev = state7.fireLine.get(defender.id);
+    const prev = state9.fireLine.get(defender.id);
     if (prev && prev.lastAttackerId !== attacker.id) {
       result.damage += VETERANCY.syriaFocusBonus;
       prev.count += 1;
       prev.lastAttackerId = attacker.id;
       ctx.log(`${ctx.typeMeta(attacker.type).name}与友军协同射击，伤害 +${VETERANCY.syriaFocusBonus}。`, "battle");
     } else {
-      state7.fireLine.set(defender.id, { lastAttackerId: attacker.id, count: prev ? prev.count : 1 });
+      state9.fireLine.set(defender.id, { lastAttackerId: attacker.id, count: prev ? prev.count : 1 });
     }
   }
   function onBeforeMove5(ctx, payload) {
     const { unit: unit2, to } = payload || {};
     if (!unit2 || !to) return;
     if (unit2.move <= 0) return;
-    syncGameRef7(ctx);
+    syncGameRef8(ctx);
     if (ctx.ownerNation(unit2.owner) !== "baghdad") return;
-    if (state7.tactic.get(unit2.owner) !== "mobility") return;
-    if (state7.mobilityUsed.has(unit2.id)) return;
+    if (state9.tactic.get(unit2.owner) !== "mobility") return;
+    if (state9.mobilityUsed.has(unit2.id)) return;
     if (!hasScholarNearby(ctx, unit2)) return;
     unit2.move += VETERANCY.mobilityPrepay;
-    state7.mobilityUsed.add(unit2.id);
+    state9.mobilityUsed.add(unit2.id);
   }
-  function onTurnStart7(ctx, payload) {
+  function onTurnStart8(ctx, payload) {
     const owner = payload && payload.owner;
-    syncGameRef7(ctx);
-    state7.cavalryFirstHit.clear();
-    state7.fireLine.clear();
-    state7.mobilityUsed.clear();
+    syncGameRef8(ctx);
+    state9.cavalryFirstHit.clear();
+    state9.fireLine.clear();
+    state9.mobilityUsed.clear();
     if (!isMamlukOwner(ctx, owner)) return;
     if (ctx.ownerNation(owner) === "egypt") {
       for (const u of ctx.game.units) {
@@ -3767,7 +4406,7 @@
         }
       }
     }
-    if (ctx.ownerNation(owner) === "baghdad" && state7.tactic.get(owner) === "drill") {
+    if (ctx.ownerNation(owner) === "baghdad" && state9.tactic.get(owner) === "drill") {
       for (const u of ctx.game.units) {
         if (u.owner !== owner || u.hp >= u.maxHp) continue;
         if (hasScholarNearby(ctx, u)) {
@@ -3775,18 +4414,18 @@
         }
       }
     }
-    if (owner === "player") {
+    if (owner === "player" || isAiOwner(owner)) {
       for (const u of ctx.game.units) {
         if (u.owner !== owner) continue;
-        const rec = state7.veterancy.get(u.id);
-        if (rec && !rec.dead && rec.veteranLevel === 2 && rec.xp >= VETERANCY.v3Threshold && !rec.promotion && !state7.v3Requested.has(u.id)) {
+        const rec = state9.veterancy.get(u.id);
+        if (rec && !rec.dead && rec.veteranLevel === 2 && rec.xp >= VETERANCY.v3Threshold && !rec.promotion && !state9.v3Requested.has(u.id)) {
           requestV3Decision(ctx, u, rec);
         }
       }
       requestTacticDecision(ctx, owner);
     }
   }
-  function attachDebug6(ctx) {
+  function attachDebug7(ctx) {
     const debug = {
       config: () => ({
         veterancy: { ...VETERANCY },
@@ -3797,26 +4436,26 @@
       // 当前全部精锐档案（可选按 owner 过滤）
       veterancy: (owner) => {
         const out = [];
-        for (const [id, r] of state7.veterancy) {
+        for (const [id, r] of state9.veterancy) {
           const u = ctx.game.units.find((x) => x.id === id);
           if (owner && (!u || u.owner !== owner)) continue;
           out.push({ ...r, type: u ? u.type : null, x: u ? u.x : null, y: u ? u.y : null });
         }
         return out;
       },
-      morale: (owner) => owner ? { [owner]: getMorale(owner) } : Object.fromEntries([...state7.morale.entries()]),
-      tactic: (owner) => owner ? { [owner]: state7.tactic.get(owner) || null } : Object.fromEntries([...state7.tactic.entries()]),
+      morale: (owner) => owner ? { [owner]: getMorale(owner) } : Object.fromEntries([...state9.morale.entries()]),
+      tactic: (owner) => owner ? { [owner]: state9.tactic.get(owner) || null } : Object.fromEntries([...state9.tactic.entries()]),
       state: () => ({
-        fireLine: [...state7.fireLine.entries()].map(([id, f]) => ({ defender: id, ...f })),
-        cavalryFirstHit: [...state7.cavalryFirstHit],
-        mobilityUsed: [...state7.mobilityUsed],
-        v3Requested: [...state7.v3Requested]
+        fireLine: [...state9.fireLine.entries()].map(([id, f]) => ({ defender: id, ...f })),
+        cavalryFirstHit: [...state9.cavalryFirstHit],
+        mobilityUsed: [...state9.mobilityUsed],
+        v3Requested: [...state9.v3Requested]
       }),
       // 手动为某单位请求 V3 晋升决策（UI 阶段前的测试入口）
       requestV3: (unitId) => {
         const u = ctx.game.units.find((x) => x.id === unitId);
         if (!u) return null;
-        const rec = state7.veterancy.get(unitId);
+        const rec = state9.veterancy.get(unitId);
         if (!rec) return null;
         return requestV3Decision(ctx, u, rec);
       },
@@ -3825,7 +4464,7 @@
       // 查看未决马穆鲁克决策（浏览器 UI 阶段前的手动测试入口）
       pending: (owner) => ctx.getPendingDecisions(owner || "player").filter((r) => String(r.id || "").startsWith("ml")).map((r) => ({ id: r.id, title: r.context.title, options: r.context.options.map((o) => o.id) })),
       resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId),
-      reset: () => resetForTests7()
+      reset: () => resetForTests8()
     };
     if (typeof globalThis !== "undefined") globalThis.__mamlukDebug = debug;
     return debug;
@@ -3836,12 +4475,12 @@
     id: "mamluk",
     // 注册时调用一次：挂载 debug/test 入口（globalThis.__mamlukDebug，浏览器控制台可用）
     init(ctx) {
-      attachDebug6(ctx);
+      attachDebug7(ctx);
     },
     // turnStart：回合级标记重置 + 埃及尼罗河补给回血 + 巴格达整军回血 +
     //            玩家决策请求（Veteran 3 晋升兜底 / 学者学术指令）
     onTurnStart(ctx, payload) {
-      onTurnStart7(ctx, payload);
+      onTurnStart8(ctx, payload);
     },
     // beforeMove：巴格达机动战术（范围内单位每回合首次移动消耗 -1，预支 +1）
     onBeforeMove(ctx, payload) {
@@ -3849,11 +4488,11 @@
     },
     // beforeAttack：士气影响 + Veteran 1/2/3 效果 + 巴格达战术 + 叙利亚协同射击（只改 result.damage）
     onBeforeAttack(ctx, payload) {
-      onBeforeAttack4(ctx, payload);
+      onBeforeAttack5(ctx, payload);
     },
     // afterAttack：攻击方经验/击杀回血/士气 + 双方精锐死亡惩罚（eliteLost）
     onAfterAttack(ctx, payload) {
-      onAfterAttack5(ctx, payload);
+      onAfterAttack6(ctx, payload);
     },
     // siteCaptured：精锐占领据点 → 经验
     onSiteCaptured(ctx, payload) {
@@ -3861,7 +4500,7 @@
     },
     // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
     reset() {
-      resetForTests7();
+      resetForTests8();
     }
   };
 
@@ -3884,39 +4523,39 @@
     watchtowerXfBonus: 1
     // 瞭望塔范围内 crossfire 加成 +1（4→5）
   };
-  var state8 = {
+  var state10 = {
     lastGameRef: null
     // 换局检测
   };
-  function resetState8() {
+  function resetState9() {
   }
-  function syncGameRef8(ctx) {
-    if (ctx && ctx.game !== state8.lastGameRef) {
-      resetState8();
-      state8.lastGameRef = ctx ? ctx.game : null;
+  function syncGameRef9(ctx) {
+    if (ctx && ctx.game !== state10.lastGameRef) {
+      resetState9();
+      state10.lastGameRef = ctx ? ctx.game : null;
     }
   }
-  function resetForTests8() {
-    resetState8();
-    state8.lastGameRef = null;
+  function resetForTests9() {
+    resetState9();
+    state10.lastGameRef = null;
   }
-  function isMingOwner(ctx, owner) {
+  function isMingOwner2(ctx, owner) {
     return !!owner && ctx.ownerFaction(owner) === "ming";
   }
   function isMingRemoteUnit(ctx, unit2) {
     if (!unit2) return false;
-    if (!isMingOwner(ctx, unit2.owner)) return false;
+    if (!isMingOwner2(ctx, unit2.owner)) return false;
     const meta = ctx.typeMeta(unit2.type);
     return !!meta && meta.range > 1;
   }
-  function inRange(a, b, range) {
+  function inRange2(a, b, range) {
     return Math.abs(a.x - b.x) <= range && Math.abs(a.y - b.y) <= range;
   }
   function fireZonesAt(ctx, x, y) {
     return ctx.getFacilitiesByType(FIREZONE.type).filter((f) => f.x === x && f.y === y);
   }
   function watchtowerCovers(ctx, x, y) {
-    return ctx.getFacilitiesByType("watchtower").some((f) => isMingOwner(ctx, f.owner) && inRange(f, { x, y }, FIREZONE.watchtowerRange));
+    return ctx.getFacilitiesByType("watchtower").some((f) => isMingOwner2(ctx, f.owner) && inRange2(f, { x, y }, FIREZONE.watchtowerRange));
   }
   function entryDamageAt(ctx, unit2, x, y) {
     let best = 0;
@@ -3935,10 +4574,10 @@
     if (watchtowerCovers(ctx, x, y)) bonus += FIREZONE.watchtowerXfBonus;
     return bonus;
   }
-  function onAfterAttack6(ctx, payload) {
+  function onAfterAttack7(ctx, payload) {
     const { attacker, defender } = payload || {};
     if (!attacker || !defender) return;
-    syncGameRef8(ctx);
+    syncGameRef9(ctx);
     if (!isMingRemoteUnit(ctx, attacker)) return;
     if (ctx.areAllies(ctx.game.teams, attacker.owner, defender.owner)) return;
     const dup = fireZonesAt(ctx, defender.x, defender.y).some((f) => f.data.sourceUnitId === attacker.id);
@@ -3961,16 +4600,16 @@
     const { unit: unit2, to } = payload || {};
     if (!unit2 || !to) return;
     if (unit2.move <= 0) return;
-    syncGameRef8(ctx);
+    syncGameRef9(ctx);
     const dmg = entryDamageAt(ctx, unit2, to.x, to.y);
     if (dmg <= 0) return;
     unit2.hp = Math.max(1, unit2.hp - dmg);
     ctx.log(`${ctx.typeMeta(unit2.type).name}闯入火力区，受到 ${dmg} 点火力打击（剩余 ${unit2.hp} HP）。`, "battle");
   }
-  function onBeforeAttack5(ctx, payload) {
+  function onBeforeAttack6(ctx, payload) {
     const { defender, result } = payload || {};
     if (!defender || !result || !result.damage) return;
-    syncGameRef8(ctx);
+    syncGameRef9(ctx);
     const bonus = crossfireBonusAt(ctx, defender, defender.x, defender.y);
     if (bonus <= 0) return;
     result.damage += bonus;
@@ -3979,13 +4618,13 @@
   function crossfireCoverCount(ctx, defender) {
     return fireZonesAt(ctx, defender.x, defender.y).filter((fz) => !ctx.areAllies(ctx.game.teams, defender.owner, fz.owner)).length;
   }
-  function onTurnStart8(ctx, payload) {
+  function onTurnStart9(ctx, payload) {
     const owner = payload && payload.owner;
-    syncGameRef8(ctx);
-    if (!isMingOwner(ctx, owner)) return;
+    syncGameRef9(ctx);
+    if (!isMingOwner2(ctx, owner)) return;
     ctx.expireFacilities(owner);
   }
-  function attachDebug7(ctx) {
+  function attachDebug8(ctx) {
     const debug = {
       config: () => ({ ...FIREZONE }),
       zones: () => ctx.getFacilitiesByType(FIREZONE.type).map((f) => ({ id: f.id, owner: f.owner, sourceUnitId: f.data.sourceUnitId, x: f.x, y: f.y, damage: f.data.damage, duration: f.duration })),
@@ -3993,269 +4632,6 @@
       crossfire: (unit2, x, y) => crossfireBonusAt(ctx, unit2, x, y)
     };
     if (typeof globalThis !== "undefined") globalThis.__mingDebug = { ...globalThis.__mingDebug || {}, fireZone: debug };
-    return debug;
-  }
-
-  // src/factions/ming/engineering.js
-  var ENGINEERING = {
-    turret: {
-      id: "turret",
-      label: "炮台",
-      cost: 20,
-      hp: 10,
-      duration: null,
-      range: 2,
-      atk: 2,
-      def: 1,
-      desc: "每回合对范围内敌方单位造成 2 点火力打击；范围内己方单位被攻击时伤害 -1"
-    },
-    watchtower: {
-      id: "watchtower",
-      label: "瞭望塔",
-      cost: 14,
-      hp: 6,
-      duration: null,
-      range: 2,
-      desc: "范围内火力区进入伤害 +1、交叉火力加成 +1（视野效果降级，见已知问题）"
-    },
-    supplyDepot: {
-      id: "supplyDepot",
-      label: "补给站",
-      cost: 18,
-      hp: 8,
-      duration: null,
-      range: 2,
-      heal: 2,
-      desc: "每回合为范围内己方单位回复 2 点生命"
-    },
-    mingTrench: {
-      id: "mingTrench",
-      label: "壕沟",
-      cost: 16,
-      hp: 12,
-      duration: null,
-      desc: "壕沟上的单位免受冲锋加成（最多减免 2 点）"
-    },
-    bridge: {
-      id: "bridge",
-      label: "临时桥",
-      cost: 12,
-      hp: 10,
-      duration: 3,
-      moveCostMod: -1,
-      desc: "桥格地形移动成本 -1（持续 3 回合，敌我单位均可利用）"
-    }
-  };
-  var state9 = {
-    lastGameRef: null,
-    // 换局检测
-    deployedThisTurn: /* @__PURE__ */ new Set()
-    // unitId：本回合已请求过部署决策（去重）
-  };
-  function resetState9() {
-    state9.deployedThisTurn.clear();
-  }
-  function syncGameRef9(ctx) {
-    if (ctx && ctx.game !== state9.lastGameRef) {
-      resetState9();
-      state9.lastGameRef = ctx ? ctx.game : null;
-    }
-  }
-  function resetForTests9() {
-    resetState9();
-    state9.lastGameRef = null;
-  }
-  function isMingOwner2(ctx, owner) {
-    return !!owner && ctx.ownerFaction(owner) === "ming";
-  }
-  function isEngineerUnit(ctx, unit2) {
-    return !!unit2 && isMingOwner2(ctx, unit2.owner) && unit2.type === "worksEngineer";
-  }
-  function inRange2(a, b, range) {
-    return Math.abs(a.x - b.x) <= range && Math.abs(a.y - b.y) <= range;
-  }
-  function isLandCell3(ctx, x, y) {
-    const g = ctx.game;
-    if (!g || x < 0 || y < 0 || x >= g.w || y >= g.h) return false;
-    const t = g.terrain[y] && g.terrain[y][x];
-    return !!t && t !== "water" && t !== "mountain";
-  }
-  function canBuildAt2(ctx, unit2, type) {
-    const def = ENGINEERING[type];
-    if (!def) return false;
-    if (!isEngineerUnit(ctx, unit2)) return false;
-    if (!isLandCell3(ctx, unit2.x, unit2.y)) return false;
-    if (ctx.getSite(unit2.x, unit2.y)) return false;
-    const existing = ctx.getFacilityAt(unit2.x, unit2.y);
-    if (existing && existing.type !== "fireZone") return false;
-    if ((ctx.game.goldByOwner[unit2.owner] || 0) < def.cost) return false;
-    return true;
-  }
-  function deployOptionsFor(ctx, unit2) {
-    const options = [{ id: "none", label: "不建", description: "保留金币与本回合行动，不部署设施。" }];
-    if (!isEngineerUnit(ctx, unit2)) return options;
-    const gold = ctx.game.goldByOwner[unit2.owner] || 0;
-    for (const key of ["turret", "watchtower", "supplyDepot", "mingTrench", "bridge"]) {
-      const d = ENGINEERING[key];
-      if (gold >= d.cost) {
-        options.push({ id: d.id, label: `部署${d.label}`, description: `${d.desc}（${d.cost}金币，${d.duration == null ? "持久" : d.duration + "回合"}）` });
-      }
-    }
-    return options;
-  }
-  function requestDeployDecision(ctx, unit2) {
-    if (!unit2 || !isEngineerUnit(ctx, unit2)) return null;
-    if (state9.deployedThisTurn.has(unit2.id)) return null;
-    if (!isLandCell3(ctx, unit2.x, unit2.y)) return null;
-    if (ctx.getSite(unit2.x, unit2.y)) return null;
-    const existing = ctx.getFacilityAt(unit2.x, unit2.y);
-    if (existing && existing.type !== "fireZone") return null;
-    if ((ctx.game.goldByOwner[unit2.owner] || 0) < ENGINEERING.turret.cost) return null;
-    const options = deployOptionsFor(ctx, unit2);
-    if (options.length <= 1) return null;
-    state9.deployedThisTurn.add(unit2.id);
-    const owner = unit2.owner;
-    const unitId = unit2.id;
-    const decisionId = `mgEng_${unitId}`;
-    return ctx.requestDecision(decisionId, {
-      owner,
-      unitId,
-      title: "工程部署",
-      description: `${ctx.typeMeta(unit2.type).name}可在此格部署工程设施（消耗本回合行动并花费金币）。`,
-      options,
-      onResolve: (choiceId) => {
-        resolveDeploy(ctx, owner, unitId, choiceId);
-      }
-    });
-  }
-  function resolveDeploy(ctx, owner, unitId, choiceId) {
-    const unit2 = ctx.game.units.find((u) => u.id === unitId);
-    if (!unit2 || unit2.owner !== owner) return false;
-    if (!choiceId || choiceId === "none") return false;
-    const def = ENGINEERING[choiceId];
-    if (!def) return false;
-    if (!canBuildAt2(ctx, unit2, choiceId)) {
-      ctx.log(`${ctx.typeMeta(unit2.type).name}无法在此格部署${def.label}（条件不再满足）。`, "warning");
-      return false;
-    }
-    if (!ctx.spendGold(owner, def.cost)) return false;
-    ctx.createFacility(choiceId, owner, unit2.x, unit2.y, {
-      hp: def.hp,
-      duration: def.duration,
-      data: { ...typeof def.moveCostMod === "number" ? { moveCostMod: def.moveCostMod } : {} }
-    });
-    unit2.acted = true;
-    unit2.move = 0;
-    unit2.hasAttacked = true;
-    ctx.log(`${ctx.typeMeta(unit2.type).name}在（${unit2.x},${unit2.y}）部署了${def.label}。`, "system");
-    return true;
-  }
-  var FACILITY_CHIP_RATIO2 = 0.5;
-  function onAfterAttack7(ctx, payload) {
-    const { attacker, defender, result } = payload || {};
-    if (!attacker || !defender || !result) return;
-    if (isMingOwner2(ctx, attacker.owner)) return;
-    const fac = ctx.getFacilityAt(defender.x, defender.y);
-    if (!fac || !isMingOwner2(ctx, fac.owner)) return;
-    if (fac.type === "fireZone") return;
-    if (ctx.areAllies(ctx.game.teams, attacker.owner, fac.owner)) return;
-    const chip = Math.max(1, Math.round((result.damage || 0) * FACILITY_CHIP_RATIO2));
-    const remaining = ctx.damageFacility(fac.id, chip);
-    const label = ENGINEERING[fac.type]?.label || fac.type;
-    if (remaining <= 0) {
-      ctx.log(`${label}在战火中被摧毁。`, "warning");
-    } else {
-      ctx.log(`${label}受到攻击受损（耐久 ${remaining}/${fac.maxHp}）。`, "warning");
-    }
-  }
-  function onTurnStart9(ctx, payload) {
-    const owner = payload && payload.owner;
-    const initial = !!(payload && payload.initial);
-    syncGameRef9(ctx);
-    if (!isMingOwner2(ctx, owner)) return;
-    state9.deployedThisTurn.clear();
-    if (!initial) {
-      const facilities2 = ctx.getFacilitiesByOwner(owner);
-      for (const f of facilities2) {
-        if (f.type !== "turret") continue;
-        const def = ENGINEERING.turret;
-        for (const u of ctx.game.units) {
-          if (u.owner === owner) continue;
-          if (ctx.areAllies(ctx.game.teams, u.owner, owner)) continue;
-          if (!inRange2(u, f, def.range)) continue;
-          if (u.hp <= 1) continue;
-          u.hp = Math.max(1, u.hp - def.atk);
-          ctx.log(`${def.label}轰击${ctx.typeMeta(u.type).name}，造成 ${def.atk} 点伤害（剩余 ${u.hp} HP）。`, "battle");
-        }
-      }
-      for (const f of facilities2) {
-        if (f.type !== "supplyDepot") continue;
-        const def = ENGINEERING.supplyDepot;
-        for (const u of ctx.game.units) {
-          if (u.owner !== owner) continue;
-          if (u.hp >= u.maxHp) continue;
-          if (!inRange2(u, f, def.range)) continue;
-          u.hp = Math.min(u.maxHp, u.hp + def.heal);
-          ctx.log(`${def.label}为${ctx.typeMeta(u.type).name}补给，回复 ${def.heal} 点生命。`, "battle");
-        }
-      }
-    }
-    if (owner === "player") {
-      for (const unit2 of ctx.game.units) {
-        if (unit2.owner !== owner) continue;
-        requestDeployDecision(ctx, unit2);
-      }
-    }
-  }
-  function onBeforeAttack6(ctx, payload) {
-    const { attacker, defender, fromCell, toCell, result, isCounter } = payload || {};
-    if (!attacker || !defender || !result || !result.damage) return;
-    syncGameRef9(ctx);
-    const fac = ctx.getFacilityAt(defender.x, defender.y);
-    if (fac && fac.type === "mingTrench" && isMingOwner2(ctx, fac.owner)) {
-      if (isCharging2(ctx, attacker, fromCell, toCell, isCounter, defender)) {
-        const atkMeta = ctx.typeMeta(attacker.type);
-        const chargeVal = (atkMeta.charge || 0) + (ctx.ownerNation(attacker.owner) === "austria" ? 1 : 0);
-        if (chargeVal > 0) {
-          result.damage = Math.max(1, result.damage - Math.min(chargeVal, 2));
-          ctx.log(`${ctx.typeMeta(attacker.type).name}的冲锋被壕沟阻挡，伤害 -${Math.min(chargeVal, 2)}。`, "battle");
-        }
-      }
-    }
-    if (isMingOwner2(ctx, defender.owner)) {
-      const turrets = ctx.getFacilitiesByType("turret").filter((f) => isMingOwner2(ctx, f.owner) && inRange2(defender, f, ENGINEERING.turret.range));
-      if (turrets.length) {
-        result.damage = Math.max(1, result.damage - ENGINEERING.turret.def);
-      }
-    }
-  }
-  function isCharging2(ctx, attacker, fromCell, toCell, isCounter, defender) {
-    if (isCounter) return false;
-    if (!attacker || attacker.move !== attacker.maxMove) return false;
-    const meta = ctx.typeMeta(attacker.type);
-    if (!meta || !meta.charge) return false;
-    if (defender && defender.type === "pikeSquare") return false;
-    const from = fromCell || { x: attacker.x, y: attacker.y };
-    const to = toCell || { x: attacker.x, y: attacker.y };
-    return ctx.diagonalDist(from, to) === 1;
-  }
-  function attachDebug8(ctx) {
-    const debug = {
-      config: () => ({ ...ENGINEERING }),
-      facilities: () => ctx.getAllFacilities().map((f) => ({ id: f.id, type: f.type, owner: f.owner, x: f.x, y: f.y, hp: f.hp, maxHp: f.maxHp, duration: f.duration, data: f.data })),
-      state: () => ({ deployedThisTurn: [...state9.deployedThisTurn] }),
-      // 为某 owner 所有工部工程师发起部署决策（返回请求数）
-      requestForOwner: (owner) => {
-        let n = 0;
-        for (const u of ctx.game.units) {
-          if (u.owner === owner && requestDeployDecision(ctx, u)) n += 1;
-        }
-        return n;
-      },
-      pending: (owner) => ctx.getPendingDecisions(owner || "player").filter((r) => String(r.id || "").startsWith("mgEng_")).map((r) => ({ id: r.id, unitId: r.context.unitId, options: r.context.options.map((o) => o.id) })),
-      resolve: (decisionId, choiceId) => ctx.resolveDecision(decisionId, choiceId)
-    };
-    if (typeof globalThis !== "undefined") globalThis.__mingDebug = { ...globalThis.__mingDebug || {}, engineering: debug };
     return debug;
   }
 
@@ -4268,24 +4644,24 @@
     stealthKey: "hidden"
     // 锦衣卫 stealth 状态 key（契约 §3.1 预设 key）
   };
-  var state10 = {
+  var state11 = {
     lastGameRef: null,
     // 换局检测
     annamFirstHit: /* @__PURE__ */ new Set()
     // unitId：本回合已享受丛林伏击首攻（每回合重置）
   };
   function resetState10() {
-    state10.annamFirstHit.clear();
+    state11.annamFirstHit.clear();
   }
   function syncGameRef10(ctx) {
-    if (ctx && ctx.game !== state10.lastGameRef) {
+    if (ctx && ctx.game !== state11.lastGameRef) {
       resetState10();
-      state10.lastGameRef = ctx ? ctx.game : null;
+      state11.lastGameRef = ctx ? ctx.game : null;
     }
   }
   function resetForTests10() {
     resetState10();
-    state10.lastGameRef = null;
+    state11.lastGameRef = null;
   }
   function atShuzhai(ctx, defender) {
     if (!defender) return false;
@@ -4307,7 +4683,7 @@
   function onTurnStart10(ctx, payload) {
     const owner = payload && payload.owner;
     syncGameRef10(ctx);
-    state10.annamFirstHit.clear();
+    state11.annamFirstHit.clear();
     if (ctx.ownerNation(owner) === "mingCore") {
       for (const u of ctx.game.units) {
         if (u.owner !== owner) continue;
@@ -4337,8 +4713,8 @@
     if (ctx.ownerNation(attacker.owner) === "annam") {
       const meta = ctx.typeMeta(attacker.type);
       const g = ctx.game;
-      if (meta && meta.domain === "land" && g.terrain && g.terrain[attacker.y] && g.terrain[attacker.y][attacker.x] === "forest" && !state10.annamFirstHit.has(attacker.id)) {
-        state10.annamFirstHit.add(attacker.id);
+      if (meta && meta.domain === "land" && g.terrain && g.terrain[attacker.y] && g.terrain[attacker.y][attacker.x] === "forest" && !state11.annamFirstHit.has(attacker.id)) {
+        state11.annamFirstHit.add(attacker.id);
         result.damage += NATION_MECHANICS.annamAmbushBonus;
         ctx.log(`${ctx.typeMeta(attacker.type).name}从丛林中发动伏击，伤害 +${NATION_MECHANICS.annamAmbushBonus}。`, "battle");
       }
@@ -4347,7 +4723,7 @@
   function attachDebug9(ctx) {
     const debug = {
       config: () => ({ ...NATION_MECHANICS }),
-      state: () => ({ annamFirstHit: [...state10.annamFirstHit] }),
+      state: () => ({ annamFirstHit: [...state11.annamFirstHit] }),
       shuzhai: (unitId) => {
         const u = ctx.game.units.find((x) => x.id === unitId);
         return u ? atShuzhai(ctx, u) : null;
@@ -4361,14 +4737,14 @@
     id: "ming",
     // 注册时调用一次：挂载 debug/test 入口（浏览器控制台可用）
     init(ctx) {
-      attachDebug7(ctx);
       attachDebug8(ctx);
+      attachDebug3(ctx);
       attachDebug9(ctx);
     },
     // turnStart：fireZone 到期移除 + 炮台/补给站结算 + 部署决策 + stealth/伏击重置
     onTurnStart(ctx, payload) {
-      onTurnStart8(ctx, payload);
       onTurnStart9(ctx, payload);
+      onTurnStart6(ctx, payload);
       onTurnStart10(ctx, payload);
     },
     // beforeMove：敌方进入火力区受伤
@@ -4377,20 +4753,20 @@
     },
     // beforeAttack：交叉火力 + 壕沟/炮台/栈桥防御 + 水寨/丛林伏击（只改 result.damage）
     onBeforeAttack(ctx, payload) {
-      onBeforeAttack5(ctx, payload);
       onBeforeAttack6(ctx, payload);
+      onBeforeAttack3(ctx, payload);
       onBeforeAttack7(ctx, payload);
     },
     // afterAttack：fireZone 生成 + 工程设施受损 + 锦衣卫暴露
     onAfterAttack(ctx, payload) {
-      onAfterAttack6(ctx, payload);
       onAfterAttack7(ctx, payload);
+      onAfterAttack5(ctx, payload);
       onAfterAttack8(ctx, payload);
     },
     // 测试/换局用：清空模块内跨局状态（主对话也可在 newGame 时调用）
     reset() {
-      resetForTests8();
       resetForTests9();
+      resetForTests6();
       resetForTests10();
     }
   };
@@ -6297,7 +6673,7 @@
     }
     function bestObjective(owner, unitEntry, intent = null) {
       const defaultAgg = AGG[game.aiProfiles?.[owner]?.agg || "balanced"] || AGG.balanced;
-      const state11 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
+      const state12 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0, failedObjectiveKey: null };
       const memory = frontMemory(owner);
       const isSea = typeMeta(unitEntry.type).domain === "sea";
       const pool = isSea ? [intent?.navalSite, intent?.assaultSite, intent?.expansionSite, ...intent?.alternateSites || []] : [intent?.expansionSite, intent?.assaultSite, ...intent?.alternateSites || []];
@@ -6314,7 +6690,7 @@
         if (strategicSiteValue(siteEntry, owner, unitEntry) <= 0) {
           return;
         }
-        if (state11.rerouteTurns > 0 && state11.failedObjectiveKey === `site:${key}`) {
+        if (state12.rerouteTurns > 0 && state12.failedObjectiveKey === `site:${key}`) {
           return;
         }
         if (memory[`site:${key}`]?.cooldown > 0) {
@@ -6447,9 +6823,9 @@
       }
       return distances;
     }
-    function finalizeUnitState(unitEntry, state11, objectiveKey, movedThisTurn) {
-      const stalledTurns = movedThisTurn ? 0 : state11.stalledTurns + 1;
-      const rerouteTurns = movedThisTurn ? Math.max(0, state11.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state11.rerouteTurns - 1);
+    function finalizeUnitState(unitEntry, state12, objectiveKey, movedThisTurn) {
+      const stalledTurns = movedThisTurn ? 0 : state12.stalledTurns + 1;
+      const rerouteTurns = movedThisTurn ? Math.max(0, state12.rerouteTurns - 1) : stalledTurns >= 2 ? 2 : Math.max(0, state12.rerouteTurns - 1);
       rememberFrontOutcome(unitEntry.owner, objectiveKey, movedThisTurn);
       if (!movedThisTurn && stalledTurns >= 2 && objectiveKey.startsWith("site:")) {
         const siteId = objectiveKey.slice(5);
@@ -6460,7 +6836,7 @@
         lastPosition: { x: unitEntry.x, y: unitEntry.y },
         stalledTurns,
         rerouteTurns,
-        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state11.failedObjectiveKey
+        failedObjectiveKey: stalledTurns >= 2 ? objectiveKey : state12.failedObjectiveKey
       };
     }
     function targetValue(unitEntry) {
@@ -6543,7 +6919,7 @@
     function chooseAction(owner, unitEntry, profile, intent = null) {
       const diffCfg = DIFF[profile.diff];
       const aggCfg = AGG[profile.agg];
-      const state11 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
+      const state12 = unitEntry.aiState || { stalledTurns: 0, rerouteTurns: 0 };
       const cells = [...reachable(game, unitEntry).entries()].map(([key, cost]) => {
         const [x, y] = key.split(",").map(Number);
         return { x, y, cost };
@@ -6562,13 +6938,13 @@
         const moveScore = objective ? (currentPath - nextPath) * 2.9 * diffCfg.lookahead * aggCfg.push : 0;
         const supportScore = friendSupport(owner, cell.x, cell.y);
         const riskPenalty = enemyThreat(owner, cell.x, cell.y) * diffCfg.risk * aggCfg.preserve * 0.9;
-        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state11.stalledTurns * 0.7);
+        const congestionPenalty = allyCongestion(owner, cell, unitEntry.id) * (1.8 + state12.stalledTurns * 0.7);
         const siteEntry = getSite2(cell.x, cell.y);
         const captureScore = siteEntry ? strategicSiteValue(siteEntry, owner, unitEntry) + cityEconomyValue(siteEntry, owner) : 0;
         const intentBonus = intent?.assaultSite ? Math.max(0, dist(unitEntry, intent.assaultSite) - dist(cell, intent.assaultSite)) * 1.4 * assaultMag : 0;
         const expansionBonus = intent?.expansionSite ? Math.max(0, dist(unitEntry, intent.expansionSite) - dist(cell, intent.expansionSite)) * 1.9 * aggCfg.expansion * expansionMag : 0;
         const futureCityPressure = objective ? Math.max(0, futureReach(unitEntry, diffCfg.lookahead) - dist(cell, objective)) * 0.35 : 0;
-        const rerouteBonus = state11.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
+        const rerouteBonus = state12.rerouteTurns > 0 && objective ? Math.max(0, dist(unitEntry, objective) - dist(cell, objective)) * 0.4 : 0;
         const terrainBonus = game.terrain[cell.y][cell.x] === "forest" ? 3 * aggCfg.forestBias : 0;
         const roleBonus = unitRoleCellBonus(owner, unitEntry, cell, intent);
         const base = moveScore + supportScore + captureScore + intentBonus + expansionBonus + futureCityPressure + rerouteBonus + terrainBonus + roleBonus - riskPenalty - congestionPenalty;
@@ -6996,18 +7372,18 @@
         if (!game.units.includes(unitEntry)) {
           continue;
         }
-        const state11 = computeUnitState(unitEntry);
+        const state12 = computeUnitState(unitEntry);
         const startCell = { x: unitEntry.x, y: unitEntry.y };
         const assaultKey = intent.assaultSite ? `site:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}` : null;
         const bridgeheadCooldown = assaultKey ? memory[assaultKey]?.cooldown > 0 : false;
-        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state11.rerouteTurns > 0 && state11.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
+        const bridgeheadBlocked = intent.assaultSite && isBridgeheadSite(intent.assaultSite) && (bridgeheadCooldown || state12.rerouteTurns > 0 && state12.failedObjectiveKey === assaultKey) && dist(unitEntry, intent.assaultSite) <= 4;
         if (bridgeheadBlocked && typeMeta(unitEntry.type).domain === "land" && profile.agg !== "reckless") {
           const retreatCell = bestRetreatCell(owner, unitEntry, intent.assaultSite);
           if (retreatCell && (retreatCell.x !== unitEntry.x || retreatCell.y !== unitEntry.y)) {
             incrementStrat(owner, "retreats");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}从桥头暂退，在 ${intent.assaultSite.name} 方向重整。`);
             moveUnit(unitEntry, retreatCell.x, retreatCell.y);
-            finalizeUnitState(unitEntry, state11, assaultKey || "idle", true);
+            finalizeUnitState(unitEntry, state12, assaultKey || "idle", true);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -7019,7 +7395,7 @@
           if (currentFrontline >= 4 && isReserveCandidate && unitEntry.hp > unitEntry.maxHp * 0.65) {
             incrementStrat(owner, "reserves");
             logAiDecision(owner, `${typeMeta(unitEntry.type).name}作为桥头预备队待机。`);
-            finalizeUnitState(unitEntry, state11, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
+            finalizeUnitState(unitEntry, state12, `reserve:${cellKey(intent.assaultSite.x, intent.assaultSite.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -7027,13 +7403,13 @@
         }
         if (isTransportUnit(unitEntry)) {
           if (!unitEntry.cargo.length && autoLoadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state11, "transport-load", false);
+            finalizeUnitState(unitEntry, state12, "transport-load", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (unitEntry.cargo.length && autoUnloadAdjacent(unitEntry)) {
-            finalizeUnitState(unitEntry, state11, "transport-unload", false);
+            finalizeUnitState(unitEntry, state12, "transport-unload", false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -7046,7 +7422,7 @@
             if (unitEntry.cargo.length && (nearThreat === 0 || escortAdjacent)) {
               autoUnloadAdjacent(unitEntry);
             }
-            finalizeUnitState(unitEntry, state11, `landing:${cellKey(landing.x, landing.y)}`, moved);
+            finalizeUnitState(unitEntry, state12, `landing:${cellKey(landing.x, landing.y)}`, moved);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -7055,13 +7431,13 @@
         if (unitEntry.type === "engineer") {
           const engineerChoice = engineerBuildChoice(owner, unitEntry, intent);
           if (engineerChoice?.kind === "camp" && buildCamp(unitEntry)) {
-            finalizeUnitState(unitEntry, state11, "camp", false);
+            finalizeUnitState(unitEntry, state12, "camp", false);
             refresh();
             await pause(aiStepDelay());
             continue;
           }
           if (engineerChoice?.cell && engineerLaunch(unitEntry, engineerChoice.kind, engineerChoice.cell, engineerChoice.cargoTypes || [])) {
-            finalizeUnitState(unitEntry, state11, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
+            finalizeUnitState(unitEntry, state12, `${engineerChoice.kind}:${cellKey(engineerChoice.cell.x, engineerChoice.cell.y)}`, false);
             refresh();
             await pause(aiStepDelay());
             continue;
@@ -7076,7 +7452,7 @@
         if (choice.target && game.units.includes(unitEntry) && game.units.includes(choice.target) && canAttack(game, unitEntry, choice.target)) {
           attack(unitEntry, choice.target);
         }
-        finalizeUnitState(unitEntry, state11, objectiveKey, !sameCell(startCell, unitEntry));
+        finalizeUnitState(unitEntry, state12, objectiveKey, !sameCell(startCell, unitEntry));
         refresh();
         await pause(aiStepDelay());
       }
@@ -7558,12 +7934,12 @@
     }
     function refreshAINation(aiIndex) {
       const factionId = $("ai" + aiIndex + "Faction")?.value;
-      const select = $("ai" + aiIndex + "Nation");
-      if (!factionId || !select) return;
-      select.innerHTML = "";
+      const select2 = $("ai" + aiIndex + "Nation");
+      if (!factionId || !select2) return;
+      select2.innerHTML = "";
       for (const [id, meta] of Object.entries(NATIONS)) {
         if (meta.faction === factionId) {
-          select.insertAdjacentHTML("beforeend", '<option value="' + id + '">' + meta.name + "</option>");
+          select2.insertAdjacentHTML("beforeend", '<option value="' + id + '">' + meta.name + "</option>");
         }
       }
     }
@@ -7602,11 +7978,11 @@
       $("factionSelect").value = "hre";
       function refreshNationSelect() {
         const factionId = $("factionSelect").value;
-        const select = $("nationSelect");
-        select.innerHTML = "";
+        const select2 = $("nationSelect");
+        select2.innerHTML = "";
         for (const [id, meta] of Object.entries(NATIONS)) {
           if (meta.faction === factionId) {
-            select.insertAdjacentHTML("beforeend", `<option value="${id}">${meta.name}（特色：${meta.unique}）</option>`);
+            select2.insertAdjacentHTML("beforeend", `<option value="${id}">${meta.name}（特色：${meta.unique}）</option>`);
           }
         }
       }

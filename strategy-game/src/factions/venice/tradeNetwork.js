@@ -9,12 +9,15 @@
 //    不在 main.js 加新埋点；"敌军进入路线"的实时提示经既有 beforeMove / siteCaptured 钩子。
 //  - 所有玩家决策点用 requestDecision/resolveDecision（契约 §4/§5）：
 //    建哪条路线 / 是否承担被切断风险 / 热那亚借贷 / 雇佣兵购买 / 拉古萨商港转化。
-//    无头 sim 自动选第一项（不建/不贷/不买/不转化）= 默认局零行为变化。
+//    无头 sim 非 AI owner 自动选第一项（不建/不贷/不买/不转化）= 原默认局零行为变化；
+//    AI owner 由 src/ai/ AI 决策系统选择（阶段6 F1 接入）。
 //  - 只经 factionContext 访问游戏：facility/decision 一律经 ctx，不直接 import core 状态性模块。
 //  - 跨局清理：对比 ctx.game 引用变化自动 reset 模块级状态（借贷/雇佣兵冷却），
 //    facility 本体由 main.js newGame 的 facilitySystem.clear() 处理。
 //
 // 未修改任何 main.js / combat.js / movement.js / factionContext.js / factionRegistry.js / 契约文件。
+
+import { isAiOwner } from '../../ai/aiUtil.js';
 
 // ---------------------------------------------------------------------------
 // 数值配置（最终值以此为准；阶段5统一平衡时可再调）
@@ -483,8 +486,8 @@ export function onTurnStart(ctx, payload) {
     maybePortProduction(ctx, owner);
   }
 
-  // 2. 玩家决策点（无头 sim 自动选第一项 = 零行为变化；AI 阶段6接入）
-  if (owner === 'player') {
+  // 2. 决策点（无头 sim 非 AI owner 自动选第一项；AI owner 由 src/ai/ 决策，阶段6 F1）
+  if (owner === 'player' || isAiOwner(owner)) {
     requestRouteDecision(ctx, owner);
     requestLoanDecision(ctx, owner);
     requestMercenaryDecision(ctx, owner);
@@ -511,14 +514,17 @@ export function maybePortProduction(ctx, owner) {
 export function requestRouteDecision(ctx, owner) {
   if (!isVeniceOwner(ctx, owner)) return null;
   if (routesOf(ctx, owner).length >= TRADE_ROUTE.maxRoutes) return null;
-  const cands = routeCandidates(ctx, owner);
-  if (!cands.length) return null;
-  const options = [{ id: 'none', label: '不建', description: '保留金币，不建立贸易路线。' }];
-  cands.forEach((c, idx) => {
+  const cands = routeCandidates(ctx, owner).map(c => {
     const risk = c.path.filter(p => {
       const u = ctx.getUnit(p.x, p.y);
       return u && !ctx.areAllies(ctx.game.teams, u.owner, owner);
     }).length;
+    return { ...c, risk };
+  });
+  if (!cands.length) return null;
+  const options = [{ id: 'none', label: '不建', description: '保留金币，不建立贸易路线。' }];
+  cands.forEach((c, idx) => {
+    const risk = c.risk;
     options.push({
       id: `route:${idx}`,
       label: `${c.a.label} ↔ ${c.b.label}`,
@@ -527,6 +533,9 @@ export function requestRouteDecision(ctx, owner) {
   });
   return ctx.requestDecision(`venRoute_${owner}`, {
     owner,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态
+    // 阶段6 F1：结构化候选数据（收益/风险/路径长度），AI 决策系统据此择优
+    cands: cands.map(c => ({ income: c.income, risk: c.risk, sea: c.sea, pathLen: c.path.length })),
     title: '贸易路线',
     description: '选择两座己方节点建立贸易路线（无直接成本，但可被敌军切断；海路需己方海军保护）。',
     options,
@@ -558,6 +567,7 @@ export function requestLoanDecision(ctx, owner) {
   ];
   return ctx.requestDecision(`venLoan_${owner}`, {
     owner,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态
     title: '热那亚银行信用',
     description: '花未来收入换当前现金——这是借贷/投资决策，请判断是否值得承担还款压力。',
     options,
@@ -592,6 +602,7 @@ export function requestMercenaryDecision(ctx, owner) {
   }
   return ctx.requestDecision(`venMerc_${owner}`, {
     owner,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态
     title: '雇佣兵市场',
     description: `按当前战场购买"临时解决方案"（部署于 ${market.name || '市场'}${market.x},${market.y}）。`,
     options,
@@ -656,6 +667,7 @@ export function requestTradingPortDecision(ctx, owner) {
   });
   return ctx.requestDecision(`venPort_${owner}`, {
     owner,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态
     title: '拉古萨中立商港',
     description: '拉古萨商队已抵达敌方港口，可将其变为交易港（不占领，可被敌军摧毁/重占）。',
     options,

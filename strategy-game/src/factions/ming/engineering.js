@@ -5,9 +5,10 @@
 //
 // 接口决策（与本文件数值共同构成"口径"，交付报告逐项列明）：
 //  - 部署单位：工部工程师（worksEngineer，大明专属 builder 单位）。
-//  - 决策点：建不建 / 建哪种 —— ctx.requestDecision，turnStart 对 owner==='player' 的
-//    worksEngineer 每回合请求一次（HRE 工事先例）。选项第一项固定为"不建"（无头 sim
-//    fallback 选第一项 = 零行为变化）；AI 工程师不建工程设施（不给 AI 发决策）。
+//  - 决策点：建不建 / 建哪种 —— ctx.requestDecision，turnStart 对 owner==='player' 或
+//    AI（阶段6 F1 接入）的 worksEngineer 每回合请求一次（HRE 工事先例）。选项第一项固定为
+//    "不建"（无头 sim 非 AI owner fallback 选第一项 = 原零行为变化）；AI 选择由 src/ai/
+//    决策系统完成。
 //    位置 = 工程师当前格（玩家移动工程师到目标格即完成"建在哪"的决策，写进口径；
 //    requestDecision 的 options 形态无法表达坐标，位置决策由移动自然承载）。
 //  - 成本/耐久：金币建造（HRE 先例），设施持久（duration=null，跨局不存档属项目已知问题）；
@@ -80,6 +81,8 @@ export function resetForTests() {
 // ---------------------------------------------------------------------------
 // 基础判定
 // ---------------------------------------------------------------------------
+import { isAiOwner } from '../../ai/aiUtil.js';
+
 export function isMingOwner(ctx, owner) {
   return !!owner && ctx.ownerFaction(owner) === 'ming';
 }
@@ -146,6 +149,7 @@ export function requestDeployDecision(ctx, unit) {
   return ctx.requestDecision(decisionId, {
     owner,
     unitId,
+    ctx, // 阶段6 F1：供 AI 决策系统查询战场状态
     title: '工程部署',
     description: `${ctx.typeMeta(unit.type).name}可在此格部署工程设施（消耗本回合行动并花费金币）。`,
     options,
@@ -243,8 +247,8 @@ export function onTurnStart(ctx, payload) {
     }
   }
 
-  // 部署决策：仅人类玩家（无头 sim 无 'player' owner → 零请求 → 零行为变化；AI 阶段6接入）
-  if (owner === 'player') {
+  // 部署决策：人类玩家与 AI（阶段6 F1 接入；AI 选择由 src/ai/ 决策系统完成）
+  if (owner === 'player' || isAiOwner(owner)) {
     for (const unit of ctx.game.units) {
       if (unit.owner !== owner) continue;
       requestDeployDecision(ctx, unit);
