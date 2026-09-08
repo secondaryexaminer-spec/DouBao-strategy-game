@@ -78,3 +78,11 @@
 ## 用户偏好与约定
 - 用户偏好 VibeCoding 工作方式：每轮收尾列改动+影响+教训；分支任务拆到附属对话省 tokens——**AI 要在合适的时机主动提醒并指导用户去开附属对话**。
 - 用户要求方案简单可操作；技术问题要求深度解析、拒绝黑盒结论。
+
+## 阶段5（2026-09-08）记录
+- **2026-09-08 · 统计基础设施落地**：为规格书 §29 的 11 项指标新增 stats 桶——battles/moves/incomeBySource/producedByType/killedByType/lostByType（SPECIAL_TYPES 从 TYPES.faction 推导，只记 45 特色兵种）。addGold 加 source 参数（faction ctx 传 'raid'/'genoaLoan' 自动入 incomeBySource）。grantIncome 薄包装统计 base。debugRunResult 加 balance 终局快照（gold/unitsAlive/level3Units/cityCount/per-type）。sim/run.js 聚合 balance（嵌套对象递归平均）。验证：seed777 旧指标逐项零变化 + suite 3/4 + 5 harness 全绿。
+- **2026-09-08 · economy.grantIncome 无 return 的坑**：抽取版 grantIncome 从不返回收入额（只有 log+加钱），薄包装 const income = economy.grantIncome(...) 得到 undefined → 统计被 income > 0 拦截 → incomeBySource.base 全 0。修复：economy.js 补 return incomePayload.amount（原调用方不依赖返回值，零行为变化）。**教训：core 抽取函数改前先确认返回值契约，不要假设有 return。**
+- **2026-09-08 · producedByType 空≠埋点坏**：默认局 strait 图 AI 走海战 AI（navalProduce），造 guard/spearman/crossbow/archer 全是**通用兵种**（无 faction 字段）→ SPECIAL_TYPES.has() 全 false → per-type 桶空。注入金帐/大明局后 producedByType/killedByType/lostByType 正常出数（khanGuard 损失 61、hongyiCannon 击杀 19 等）。**教训：per-type 统计只在特色局有数据，默认局空是预期。**
+- **2026-09-08 · strait 图 C 侧系统性优势（约 8:1）**：5 联盟镜像局（rounds=3）胜场分布全是 C(ai1) 8:1——**位置偏差**（suite 已知 mirror-strait B 胜率 38%）。**阶段5 铁律：平衡对比必须 ai0/ai1 对调取平均，单侧数据全部无效**；跨联盟单局（horde vs ming 等）被污染不可作平衡结论。
+- **2026-09-08 · 阶段5 首版数据画像**：金帐暴兵流（produced 286:248 镜像、khanGuard 大量损失）；威尼斯回合收入 base 最高（19984，贸易加成生效）；各联盟 level3 都有积累（veterancy 生效）；金帐 raid 收入 909~1161（掠袭机制活跃）。候选调整：金帐产能、大明 level3 速度、3 组职责重复兵种、雇佣兵老规矩、可汗威望 10 档口径。
+- **2026-09-08 · diff-gap 50% 归阶段6**：冷酷 AI 胜率不足是 AI 难度问题（机制全定才练 AI），登记为阶段6 前置验收项，阶段5 数值不动。

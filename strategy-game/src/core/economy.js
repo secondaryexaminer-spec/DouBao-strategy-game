@@ -50,6 +50,7 @@ export function grantIncome(game, deps, owner) {
   if (gain > 0) {
     log(`${ownerName(owner)}获得 ${gain} 金币收入。`, 'gold');
   }
+  return incomePayload.amount; // 阶段5：返回收入额供平衡统计（原调用方不依赖返回值，零行为变化）
 }
 
 // 据点升级费用（siteMeta 的升级表）

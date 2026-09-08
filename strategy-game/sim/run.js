@@ -163,12 +163,52 @@ const outFile = args.out ? path.resolve(args.out) : path.join(__dirname, 'last-r
       }
     }
     const n = Math.max(1, result.runs.length);
+    // 阶段5：balance 统计聚合（battles/moves/incomeBySource/per-type/终局快照）
+    const balance = {};
+    for (const run of result.runs) {
+      for (const [owner, b] of Object.entries(run.balance || {})) {
+        balance[owner] = balance[owner] || {};
+        for (const [key, val] of Object.entries(b)) {
+          if (typeof val === 'number') {
+            balance[owner][key] = (balance[owner][key] || 0) + val;
+          } else if (val && typeof val === 'object') {
+            balance[owner][key] = balance[owner][key] || {};
+            for (const [sub, v] of Object.entries(val)) {
+              if (typeof v === 'number') balance[owner][key][sub] = (balance[owner][key][sub] || 0) + v;
+              else if (v && typeof v === 'object') {
+                balance[owner][key][sub] = balance[owner][key][sub] || {};
+                for (const [s2, v2] of Object.entries(v)) {
+                  balance[owner][key][sub][s2] = (balance[owner][key][sub][s2] || 0) + v2;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
     for (const owner of Object.keys(byOwner)) {
       for (const key of Object.keys(byOwner[owner])) {
         byOwner[owner][key] = Math.round((byOwner[owner][key] / n) * 10) / 10;
       }
     }
-    out[`seed${seed}`] = { ...result.agg, byOwner, owners: result.runs[0]?.byOwner ? Object.keys(result.runs[0].byOwner) : [] };
+    for (const owner of Object.keys(balance)) {
+      for (const key of Object.keys(balance[owner])) {
+        if (balance[owner][key] && typeof balance[owner][key] === 'object') {
+          for (const sub of Object.keys(balance[owner][key])) {
+            if (balance[owner][key][sub] && typeof balance[owner][key][sub] === 'object') {
+              for (const s2 of Object.keys(balance[owner][key][sub])) {
+                balance[owner][key][sub][s2] = Math.round((balance[owner][key][sub][s2] / n) * 10) / 10;
+              }
+            } else {
+              balance[owner][key][sub] = Math.round((balance[owner][key][sub] / n) * 10) / 10;
+            }
+          }
+        } else {
+          balance[owner][key] = Math.round((balance[owner][key] / n) * 10) / 10;
+        }
+      }
+    }
+    out[`seed${seed}`] = { ...result.agg, byOwner, balance, owners: result.runs[0]?.byOwner ? Object.keys(result.runs[0].byOwner) : [] };
   }
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
   const payload = {

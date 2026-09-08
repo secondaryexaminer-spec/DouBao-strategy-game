@@ -1215,6 +1215,7 @@
     if (gain > 0) {
       log(`${ownerName(owner)}获得 ${gain} 金币收入。`, "gold");
     }
+    return incomePayload.amount;
   }
   function siteUpgradeCost(game, deps, siteEntry) {
     return siteMeta(siteEntry.kind).upgradeCosts[siteEntry.tier] || 0;
@@ -4418,8 +4419,10 @@
         ownerFaction,
         ownerNation: ownerNation2,
         log,
-        addGold: (owner, amount) => {
+        addGold: (owner, amount, source = "bonus") => {
           game.goldByOwner[owner] = (game.goldByOwner[owner] || 0) + amount;
+          const srcBucket = game?.stats?.incomeBySource?.[owner];
+          if (srcBucket && typeof srcBucket[source] === "number") srcBucket[source] += amount;
         },
         spendGold: (owner, amount) => {
           if ((game.goldByOwner[owner] || 0) < amount) return false;
@@ -4433,6 +4436,7 @@
           const created = unit2(type, owner, x, y);
           game.units.push(created);
           incrementStat("produced", owner, 1);
+          incrementStatByType("producedByType", owner, type, 1);
           return created;
         }
       });
@@ -4524,6 +4528,33 @@
           totals[key] = (totals[key] || 0) + strat[owner][key];
         }
       }
+      const balance = {};
+      const stats = game?.stats || {};
+      for (const owner of Object.keys(stats.battles || {})) {
+        balance[owner] = {
+          battles: stats.battles?.[owner] || 0,
+          moves: stats.moves?.[owner] || 0,
+          produced: stats.produced?.[owner] || 0,
+          kills: stats.kills?.[owner] || 0,
+          losses: stats.losses?.[owner] || 0,
+          captures: stats.captures?.[owner] || 0,
+          gold: game.goldByOwner?.[owner] || 0,
+          incomeBySource: { ...stats.incomeBySource?.[owner] || {} },
+          producedByType: { ...stats.producedByType?.[owner] || {} },
+          killedByType: { ...stats.killedByType?.[owner] || {} },
+          lostByType: { ...stats.lostByType?.[owner] || {} },
+          // 终局军队结构（派生指标）
+          unitsAlive: 0,
+          level3Units: 0,
+          cityCount: 0
+        };
+        for (const u of game.units) {
+          if (u.owner !== owner) continue;
+          balance[owner].unitsAlive += 1;
+          if ((typeMeta(u.type).level || 0) >= 3) balance[owner].level3Units += 1;
+        }
+        balance[owner].cityCount = game.sites.filter((s) => s.kind === "city" && s.owner === owner).length;
+      }
       return {
         turn: game.turn,
         over: game.over,
@@ -4536,7 +4567,8 @@
           acc[t] = (acc[t] || 0) + 1;
           return acc;
         }, {}),
-        unitsAlive: game.units.length
+        unitsAlive: game.units.length,
+        balance
       };
     }
     async function fastRun(cap = 150) {
@@ -4629,6 +4661,17 @@
         return;
       }
       game.stats[bucket][owner] += value;
+    }
+    const SPECIAL_TYPES = new Set(Object.keys(TYPES).filter((t) => TYPES[t].faction));
+    function incrementStatByType(bucket, owner, type, value = 1) {
+      const bucketObj = game?.stats?.[bucket]?.[owner];
+      if (!bucketObj || typeof bucketObj !== "object") {
+        return;
+      }
+      if (!SPECIAL_TYPES.has(type)) {
+        return;
+      }
+      bucketObj[type] = (bucketObj[type] || 0) + value;
     }
     function incrementStrat(owner, key, value = 1) {
       const bucket = game?.stats?.strat?.[owner];
@@ -5065,6 +5108,7 @@
         log(`${typeMeta(unitEntry.type).name}被击沉，船上搭载单位全部损失。`, "warning");
       }
       incrementStat("losses", unitEntry.owner, 1 + (unitEntry.cargo?.length || 0));
+      incrementStatByType("lostByType", unitEntry.owner, unitEntry.type, 1 + (unitEntry.cargo?.length || 0));
       game.units = game.units.filter((entry) => entry !== unitEntry);
       recordStatSnapshot("loss");
       if (!game.over) {
@@ -5072,6 +5116,7 @@
       }
     }
     function attack(attacker, defender) {
+      incrementStat("battles", attacker.owner, 1);
       const result = previewCombat(game, attacker, defender, { x: attacker.x, y: attacker.y }, false);
       const atkPayload = { attacker, defender, fromCell: { x: attacker.x, y: attacker.y }, toCell: { x: defender.x, y: defender.y }, result, isCounter: false, cancel: false };
       eventBus.emit("beforeAttack", atkPayload);
@@ -5103,6 +5148,7 @@
       log(`${ownerName(attacker.owner)}的${typeMeta(attacker.type).name}攻击${ownerName(defender.owner)}的${typeMeta(defender.type).name}，造成 ${result.damage} 点伤害。`, "battle");
       if (defender.hp <= 0) {
         incrementStat("kills", attacker.owner, 1 + (defender.cargo?.length || 0));
+        incrementStatByType("killedByType", attacker.owner, defender.type, 1 + (defender.cargo?.length || 0));
         grantKills2(attacker, 1 + (defender.cargo?.length || 0));
         if (attacker.type === "sultanGuard") {
           attacker.hp = Math.min(attacker.maxHp, attacker.hp + 3);
@@ -5119,6 +5165,7 @@
         }
         if (attacker.hp <= 0) {
           incrementStat("kills", defender.owner, 1 + (attacker.cargo?.length || 0));
+          incrementStatByType("killedByType", defender.owner, attacker.type, 1 + (attacker.cargo?.length || 0));
           grantKills2(defender, 1 + (attacker.cargo?.length || 0));
           removeUnit(attacker);
           log(`${typeMeta(attacker.type).name}在反击中被击毁。`, "battle");
@@ -5229,6 +5276,7 @@
       unitEntry.y = y;
       unitEntry.move -= cost;
       unitEntry.acted = true;
+      incrementStat("moves", unitEntry.owner, 1);
       captureSite(unitEntry);
       return true;
     }
@@ -5305,7 +5353,10 @@
       return healOwner(game, economyDeps, owner);
     }
     function grantIncome2(owner) {
-      return grantIncome(game, economyDeps, owner);
+      const income = grantIncome(game, economyDeps, owner);
+      const srcBucket = game?.stats?.incomeBySource?.[owner];
+      if (srcBucket && income > 0) srcBucket.base += income;
+      return income;
     }
     function decayTemporarySites(owner) {
       const expired = [];
@@ -5458,6 +5509,7 @@
       consumeAction(unitEntry);
       clearPendingOrder();
       incrementStat("produced", unitEntry.owner, isTransportType(type) ? 1 + cargoTypes.length : 1);
+      incrementStatByType("producedByType", unitEntry.owner, type, isTransportType(type) ? 1 + cargoTypes.length : 1);
       if (isTransportType(type)) {
         incrementStrat(unitEntry.owner, "transportLaunches");
       }
@@ -7083,6 +7135,13 @@
           losses: Object.fromEntries(owners.map((owner) => [owner, 0])),
           captures: Object.fromEntries(owners.map((owner) => [owner, 0])),
           lostSites: Object.fromEntries(owners.map((owner) => [owner, 0])),
+          // 阶段5 平衡统计（规格书§29 的 11 项指标）
+          battles: Object.fromEntries(owners.map((owner) => [owner, 0])),
+          moves: Object.fromEntries(owners.map((owner) => [owner, 0])),
+          incomeBySource: Object.fromEntries(owners.map((owner) => [owner, { base: 0, raid: 0, trade: 0, loan: 0, sell: 0, bonus: 0 }])),
+          producedByType: Object.fromEntries(owners.map((owner) => [owner, {}])),
+          killedByType: Object.fromEntries(owners.map((owner) => [owner, {}])),
+          lostByType: Object.fromEntries(owners.map((owner) => [owner, {}])),
           strat: Object.fromEntries(owners.map((owner) => [owner, { stalls: 0, reserves: 0, reroutes: 0, retreats: 0, cityCaptures: 0, oilCaptures: 0, shipyardCaptures: 0, engineerLandings: 0, transportLaunches: 0, campsBuilt: 0, sells: 0 }])),
           history: []
         },

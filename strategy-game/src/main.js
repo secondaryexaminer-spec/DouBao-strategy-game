@@ -65,7 +65,11 @@ import { mingSystem } from './factions/ming/mingRules.js';
       ownerFaction,
       ownerNation,
       log,
-      addGold: (owner, amount) => { game.goldByOwner[owner] = (game.goldByOwner[owner] || 0) + amount; },
+      addGold: (owner, amount, source = 'bonus') => {
+        game.goldByOwner[owner] = (game.goldByOwner[owner] || 0) + amount;
+        const srcBucket = game?.stats?.incomeBySource?.[owner];
+        if (srcBucket && typeof srcBucket[source] === 'number') srcBucket[source] += amount;
+      },
       spendGold: (owner, amount) => {
         if ((game.goldByOwner[owner] || 0) < amount) return false;
         game.goldByOwner[owner] -= amount;
@@ -78,6 +82,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
         const created = unit(type, owner, x, y);
         game.units.push(created);
         incrementStat('produced', owner, 1);
+        incrementStatByType('producedByType', owner, type, 1); // 阶段5：特色生产
         return created;
       },
     });
@@ -183,6 +188,32 @@ import { mingSystem } from './factions/ming/mingRules.js';
         totals[key] = (totals[key] || 0) + strat[owner][key];
       }
     }
+    // 阶段5：11 项指标终局快照（平衡统计）
+    const balance = {};
+    const stats = game?.stats || {};
+    for (const owner of Object.keys(stats.battles || {})) {
+      balance[owner] = {
+        battles: stats.battles?.[owner] || 0,
+        moves: stats.moves?.[owner] || 0,
+        produced: stats.produced?.[owner] || 0,
+        kills: stats.kills?.[owner] || 0,
+        losses: stats.losses?.[owner] || 0,
+        captures: stats.captures?.[owner] || 0,
+        gold: game.goldByOwner?.[owner] || 0,
+        incomeBySource: { ...(stats.incomeBySource?.[owner] || {}) },
+        producedByType: { ...(stats.producedByType?.[owner] || {}) },
+        killedByType: { ...(stats.killedByType?.[owner] || {}) },
+        lostByType: { ...(stats.lostByType?.[owner] || {}) },
+        // 终局军队结构（派生指标）
+        unitsAlive: 0, level3Units: 0, cityCount: 0
+      };
+      for (const u of game.units) {
+        if (u.owner !== owner) continue;
+        balance[owner].unitsAlive += 1;
+        if ((typeMeta(u.type).level || 0) >= 3) balance[owner].level3Units += 1;
+      }
+      balance[owner].cityCount = game.sites.filter(s => s.kind === 'city' && s.owner === owner).length;
+    }
     return {
       turn: game.turn,
       over: game.over,
@@ -191,7 +222,8 @@ import { mingSystem } from './factions/ming/mingRules.js';
       byOwner: JSON.parse(JSON.stringify(strat)),
       byTeam: aggregateStratByTeam(),
       cityOwners: game.sites.filter(s => s.kind === 'city').reduce((acc, s) => { const t = s.owner === 'neutral' ? 'neutral' : teamOf(s.owner); acc[t] = (acc[t] || 0) + 1; return acc; }, {}),
-      unitsAlive: game.units.length
+      unitsAlive: game.units.length,
+      balance
     };
   }
 
@@ -291,6 +323,20 @@ import { mingSystem } from './factions/ming/mingRules.js';
       return;
     }
     game.stats[bucket][owner] += value;
+  }
+
+  // 阶段5 统计：特色兵种 per-type 计数（producedByType/killedByType/lostByType）。
+  // 只记 45 个特色兵种（TYPES 里有 faction 字段者），避免全类型统计膨胀。
+  const SPECIAL_TYPES = new Set(Object.keys(TYPES).filter(t => TYPES[t].faction));
+  function incrementStatByType(bucket, owner, type, value = 1) {
+    const bucketObj = game?.stats?.[bucket]?.[owner];
+    if (!bucketObj || typeof bucketObj !== 'object') {
+      return;
+    }
+    if (!SPECIAL_TYPES.has(type)) {
+      return;
+    }
+    bucketObj[type] = (bucketObj[type] || 0) + value;
   }
 
   function incrementStrat(owner, key, value = 1) {
@@ -759,6 +805,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
       log(`${typeMeta(unitEntry.type).name}被击沉，船上搭载单位全部损失。`, 'warning');
     }
     incrementStat('losses', unitEntry.owner, 1 + (unitEntry.cargo?.length || 0));
+    incrementStatByType('lostByType', unitEntry.owner, unitEntry.type, 1 + (unitEntry.cargo?.length || 0)); // 阶段5：特色损失
     game.units = game.units.filter(entry => entry !== unitEntry);
     recordStatSnapshot('loss');
     // Detect elimination victories the moment the last enemy unit dies, not only at turn start.
@@ -768,6 +815,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
   }
 
   function attack(attacker, defender) {
+    incrementStat('battles', attacker.owner, 1); // 阶段5：战斗次数
     const result = previewCombat(game, attacker, defender, { x: attacker.x, y: attacker.y }, false);
     const atkPayload = { attacker, defender, fromCell: { x: attacker.x, y: attacker.y }, toCell: { x: defender.x, y: defender.y }, result, isCounter: false, cancel: false };
     eventBus.emit('beforeAttack', atkPayload);
@@ -799,6 +847,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
     log(`${ownerName(attacker.owner)}的${typeMeta(attacker.type).name}攻击${ownerName(defender.owner)}的${typeMeta(defender.type).name}，造成 ${result.damage} 点伤害。`, 'battle');
     if (defender.hp <= 0) {
       incrementStat('kills', attacker.owner, 1 + (defender.cargo?.length || 0));
+      incrementStatByType('killedByType', attacker.owner, defender.type, 1 + (defender.cargo?.length || 0)); // 阶段5：特色击杀
       grantKills(attacker, 1 + (defender.cargo?.length || 0));
       // 苏丹禁卫：击杀后回血3
       if (attacker.type === 'sultanGuard') {
@@ -817,6 +866,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
       }
       if (attacker.hp <= 0) {
         incrementStat('kills', defender.owner, 1 + (attacker.cargo?.length || 0));
+        incrementStatByType('killedByType', defender.owner, attacker.type, 1 + (attacker.cargo?.length || 0)); // 阶段5：特色击杀（反击方）
         grantKills(defender, 1 + (attacker.cargo?.length || 0));
         removeUnit(attacker);
         log(`${typeMeta(attacker.type).name}在反击中被击毁。`, 'battle');
@@ -935,6 +985,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
     unitEntry.y = y;
     unitEntry.move -= cost;
     unitEntry.acted = true;
+    incrementStat('moves', unitEntry.owner, 1); // 阶段5：移动格数
     captureSite(unitEntry);
     return true;
   }
@@ -1020,7 +1071,12 @@ import { mingSystem } from './factions/ming/mingRules.js';
 
   function healOwner(owner) { return economy.healOwner(game, economyDeps, owner); }
 
-  function grantIncome(owner) { return economy.grantIncome(game, economyDeps, owner); }
+  function grantIncome(owner) {
+    const income = economy.grantIncome(game, economyDeps, owner);
+    const srcBucket = game?.stats?.incomeBySource?.[owner];
+    if (srcBucket && income > 0) srcBucket.base += income; // 阶段5：回合收入归 base
+    return income;
+  }
 
   function decayTemporarySites(owner) {
     const expired = [];
@@ -1173,6 +1229,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
     consumeAction(unitEntry);
     clearPendingOrder();
     incrementStat('produced', unitEntry.owner, isTransportType(type) ? 1 + cargoTypes.length : 1);
+    incrementStatByType('producedByType', unitEntry.owner, type, isTransportType(type) ? 1 + cargoTypes.length : 1); // 阶段5：特色生产
     if (isTransportType(type)) {
       incrementStrat(unitEntry.owner, 'transportLaunches');
     }
@@ -2920,6 +2977,13 @@ import { mingSystem } from './factions/ming/mingRules.js';
         losses: Object.fromEntries(owners.map(owner => [owner, 0])),
         captures: Object.fromEntries(owners.map(owner => [owner, 0])),
         lostSites: Object.fromEntries(owners.map(owner => [owner, 0])),
+        // 阶段5 平衡统计（规格书§29 的 11 项指标）
+        battles: Object.fromEntries(owners.map(owner => [owner, 0])),
+        moves: Object.fromEntries(owners.map(owner => [owner, 0])),
+        incomeBySource: Object.fromEntries(owners.map(owner => [owner, { base: 0, raid: 0, trade: 0, loan: 0, sell: 0, bonus: 0 }])),
+        producedByType: Object.fromEntries(owners.map(owner => [owner, {}])),
+        killedByType: Object.fromEntries(owners.map(owner => [owner, {}])),
+        lostByType: Object.fromEntries(owners.map(owner => [owner, {}])),
         strat: Object.fromEntries(owners.map(owner => [owner, { stalls: 0, reserves: 0, reroutes: 0, retreats: 0, cityCaptures: 0, oilCaptures: 0, shipyardCaptures: 0, engineerLandings: 0, transportLaunches: 0, campsBuilt: 0, sells: 0 }])),
         history: []
       },
