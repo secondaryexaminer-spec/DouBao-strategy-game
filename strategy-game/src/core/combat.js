@@ -6,6 +6,9 @@ import { TERRAIN } from './constants.js';
 import { typeMeta, siteMeta, clamp, rnd, diagonalDist, inUnitRange } from './utils.js';
 import { areAllies, areEnemies } from './teams.js';
 
+// 攻城器械：对据点驻军额外伤害（规格书"投石车=攻城"定位 + 兵种描述；阶段4 补齐）
+const SIEGE_DAMAGE = { catapult: 2, heavyCatapult: 3, siegeCrossbow: 2, nomadChariot: 2, nomadCannon: 2 };
+
 export function getSite(game, x, y) {
   return game.sites.find(entry => entry.x === x && entry.y === y) || null;
 }
@@ -69,9 +72,11 @@ export function computeDamage(game, attacker, defender, fromCell, toCell, isCoun
   const defendHpFactor = 0.55 + defender.hp / defender.maxHp * 0.55;
   const chargeBonus = atkNation === 'austria' && attackMeta.charge ? 1 : 0;
   const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove && defender.type !== 'pikeSquare' ? attackMeta.charge + chargeBonus : 0;
-  // 兵种级别效果：帝国近卫军守点防御+3，安南象兵对步兵+5
+  // 兵种级别效果：帝国近卫军守点防御+3，通用近卫军守点防御+1（规格书 §近卫军=守点，阶段4 补齐），
+  // 安南象兵对步兵+5
   const defenderOnSite = !!getSite(game, toCell.x, toCell.y);
-  const guardBonus = defender.type === 'imperialGuard' && defenderOnSite && getSite(game, toCell.x, toCell.y).owner === defender.owner ? 3 : 0;
+  const guardBonus = defender.type === 'imperialGuard' && defenderOnSite && getSite(game, toCell.x, toCell.y).owner === defender.owner ? 3
+    : defender.type === 'guard' && defenderOnSite && getSite(game, toCell.x, toCell.y).owner === defender.owner ? 1 : 0;
   const elephantBonus = attacker.type === 'annamElephant' && defenseMeta.domain === 'land' && !defenseMeta.charge ? 5 : 0;
   // 国家机制：攻防加成
   let nationAtk = 0, nationDef = 0;
@@ -80,6 +85,8 @@ export function computeDamage(game, attacker, defender, fromCell, toCell, isCoun
   if (atkNation === 'veniceCore' && attackMeta.domain === 'sea') nationAtk += 1; // 威尼斯本部：海军攻击+1
   if (atkNation === 'syria' && attackerFaction !== defenderFaction) nationAtk += 1; // 叙利亚：对异联盟攻击+1
   if (atkNation === 'prussia' && !!getSite(game, toCell.x, toCell.y)) nationAtk += 3; // 普鲁士：对据点内单位伤害+3
+  // 攻城器械：对据点驻军额外伤害（阶段4 补齐；与普鲁士+3 不同来源可叠加）
+  if (getSite(game, toCell.x, toCell.y)) nationAtk += SIEGE_DAMAGE[attacker.type] || 0;
   if (defNation === 'baghdad' && defender.type === 'caliphScholar') nationDef += 2; // 巴格达：光环单位自身防御+2
   const base = (attackMeta.atk + attackBuff + attacker.rank + elephantBonus + nationAtk) * attackHpFactor + charge;
   const shield = (defenseMeta.def + defenseBuff + guardBonus + nationDef) * defendHpFactor;
@@ -105,6 +112,8 @@ function effectiveRange(game, unitEntry) {
   // 热那亚：海军远程射程+1；叙利亚：远程射程+1
   if (nat === 'genoa' && typeMeta(unitEntry.type).domain === 'sea') return base + 1;
   if (nat === 'syria') return base + 1;
+  // 巴伐利亚山地弩手：驻扎山地射程+1（阶段4 补齐，规格书/描述）
+  if (nat === 'bavaria' && game.terrain[unitEntry.y]?.[unitEntry.x] === 'hill') return base + 1;
   return base;
 }
 

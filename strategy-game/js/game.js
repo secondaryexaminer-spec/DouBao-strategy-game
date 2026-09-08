@@ -83,7 +83,7 @@
     // === 威尼斯共和国（venice）联盟专属兵种 ===
     marine: { name: "海军陆战队", icon: "🪖", level: 2, hp: 14, atk: 7, def: 4, move: 3, range: 1, cost: 38, domain: "land", faction: "venice", text: "两栖登陆作战单位" },
     galleyWarship: { name: "桨帆战舰", icon: "🚣", level: 2, hp: 18, atk: 10, def: 4, move: 4, range: 2, cost: 50, domain: "sea", faction: "venice", text: "标准海战主力" },
-    masterEngineer: { name: "大师工程师", icon: "🔧", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 48, domain: "land", faction: "venice", builder: true, text: "造船费用-20%，可建高级营地" },
+    masterEngineer: { name: "大师工程师", icon: "🔧", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 48, domain: "land", faction: "venice", builder: true, text: "威尼斯工程师，可造船与建营（威尼斯本部造船费用-20%）。" },
     venetianBattleship: { name: "威尼斯战舰", icon: "🔥", level: 3, hp: 12, atk: 14, def: 3, move: 3, range: 4, cost: 64, domain: "sea", faction: "venice", text: "海上远程火力压制" },
     tradeCaravan: { name: "商队", icon: "💰", level: 1, hp: 10, atk: 2, def: 2, move: 4, range: 1, cost: 30, domain: "land", faction: "venice", text: "占领据点后该据点收入+3/回合" },
     mercenarySwordsman: { name: "雇佣剑士", icon: "🗡", level: 2, hp: 15, atk: 8, def: 4, move: 3, range: 1, cost: 40, domain: "land", faction: "venice", text: "精锐雇佣兵" },
@@ -103,10 +103,10 @@
     syrianLongbow: { name: "叙利亚长弓手", icon: "🌙", level: 3, hp: 10, atk: 9, def: 2, move: 2, range: 3, cost: 46, domain: "land", faction: "mamluk", nation: "syria", text: "联盟最远陆军" },
     caliphScholar: { name: "哈里发学者", icon: "📜", level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: "land", faction: "mamluk", nation: "baghdad", text: "光环单位，周围2格友军攻防+1" },
     // === 大明帝国（ming）联盟专属兵种 ===
-    shenjiBattalion: { name: "神机营火枪兵", icon: "🎇", level: 3, hp: 8, atk: 9, def: 1, move: 2, range: 3, cost: 48, domain: "land", faction: "ming", text: "火器齐射，攻击溅射50%到周围1格" },
+    shenjiBattalion: { name: "神机营火枪兵", icon: "🎇", level: 3, hp: 8, atk: 9, def: 1, move: 2, range: 3, cost: 48, domain: "land", faction: "ming", text: "火器齐射，攻击溅射50%到周围1格（大明本部60%）。" },
     qiArmy: { name: "戚家军", icon: "🥋", level: 2, hp: 16, atk: 7, def: 6, move: 3, range: 1, cost: 44, domain: "land", faction: "ming", text: "高防步兵，鸳鸯阵", bonusVs: { cavalry: 3 } },
     mingCavalry: { name: "大明骑兵", icon: "🐅", level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 46, domain: "land", faction: "ming", text: "通用机动打击", charge: 2 },
-    worksEngineer: { name: "工部工程师", icon: "🏗️", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 46, domain: "land", faction: "ming", builder: true, text: "造船/建营速度+50%，费用-10%" },
+    worksEngineer: { name: "工部工程师", icon: "🏗️", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 46, domain: "land", faction: "ming", builder: true, text: "大明工程师，可造船与建营并部署工程设施（大明本部费用-10%）。" },
     treasureShip: { name: "宝船", icon: "🐉", level: 3, hp: 30, atk: 4, def: 5, move: 3, range: 1, cost: 60, domain: "sea", faction: "ming", transport: 10, text: "巨型运输船，可运10个陆军" },
     hongyiCannon: { name: "红夷大炮", icon: "☄️", level: 3, hp: 6, atk: 16, def: 1, move: 1, range: 5, cost: 64, domain: "land", faction: "ming", text: "超远程攻城，联盟最远单位" },
     // === 大明国家特色兵种 ===
@@ -600,6 +600,7 @@
   }
 
   // src/core/combat.js
+  var SIEGE_DAMAGE = { catapult: 2, heavyCatapult: 3, siegeCrossbow: 2, nomadChariot: 2, nomadCannon: 2 };
   function getSite(game, x, y) {
     return game.sites.find((entry) => entry.x === x && entry.y === y) || null;
   }
@@ -659,12 +660,13 @@
     const chargeBonus = atkNation === "austria" && attackMeta.charge ? 1 : 0;
     const charge = attackMeta.charge && !isCounter && diagonalDist(fromCell, toCell) === 1 && attacker.move === attacker.maxMove && defender.type !== "pikeSquare" ? attackMeta.charge + chargeBonus : 0;
     const defenderOnSite = !!getSite(game, toCell.x, toCell.y);
-    const guardBonus = defender.type === "imperialGuard" && defenderOnSite && getSite(game, toCell.x, toCell.y).owner === defender.owner ? 3 : 0;
+    const guardBonus = defender.type === "imperialGuard" && defenderOnSite && getSite(game, toCell.x, toCell.y).owner === defender.owner ? 3 : defender.type === "guard" && defenderOnSite && getSite(game, toCell.x, toCell.y).owner === defender.owner ? 1 : 0;
     const elephantBonus = attacker.type === "annamElephant" && defenseMeta.domain === "land" && !defenseMeta.charge ? 5 : 0;
     let nationAtk = 0, nationDef = 0;
     if (atkNation === "veniceCore" && attackMeta.domain === "sea") nationAtk += 1;
     if (atkNation === "syria" && attackerFaction !== defenderFaction) nationAtk += 1;
     if (atkNation === "prussia" && !!getSite(game, toCell.x, toCell.y)) nationAtk += 3;
+    if (getSite(game, toCell.x, toCell.y)) nationAtk += SIEGE_DAMAGE[attacker.type] || 0;
     if (defNation === "baghdad" && defender.type === "caliphScholar") nationDef += 2;
     const base = (attackMeta.atk + attackBuff + attacker.rank + elephantBonus + nationAtk) * attackHpFactor + charge;
     const shield = (defenseMeta.def + defenseBuff + guardBonus + nationDef) * defendHpFactor;
@@ -687,6 +689,7 @@
     const nat = combatNation(game, unitEntry.owner);
     if (nat === "genoa" && typeMeta(unitEntry.type).domain === "sea") return base + 1;
     if (nat === "syria") return base + 1;
+    if (nat === "bavaria" && game.terrain[unitEntry.y]?.[unitEntry.x] === "hill") return base + 1;
     return base;
   }
   function canAttack(game, attacker, defender, fromCell = { x: attacker.x, y: attacker.y }) {
@@ -799,6 +802,7 @@
     if (nation === "blueHorde" && terrain === "snow") return 1;
     if ((nation === "bavaria" || nation === "joseon") && terrain === "hill") return 1;
     if (nation === "annam" && terrain === "forest") return 1;
+    if (unitEntry.type === "arabArcher" && terrain === "desert") return 1;
     let cost = baseCost;
     cost += facilitySystem.getMoveCostModAt(x, y);
     return Math.max(1, cost);

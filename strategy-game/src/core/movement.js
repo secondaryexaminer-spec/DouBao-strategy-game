@@ -36,6 +36,8 @@ export function movementCost(game, unitEntry, x, y) {
   if (nation === 'blueHorde' && terrain === 'snow') return 1;
   if ((nation === 'bavaria' || nation === 'joseon') && terrain === 'hill') return 1;
   if (nation === 'annam' && terrain === 'forest') return 1;
+  // 兵种特性（阶段4 补齐）：阿拉伯弓手沙漠行军不消耗（兵种级，任何马穆鲁克国家适用）
+  if (unitEntry.type === 'arabArcher' && terrain === 'desert') return 1;
   // 设施通用修正（阶段3 裁决③）：facilitySystem 提供 getMoveCostModAt（facility.data
   // .moveCostMod 是数字时叠加到地形成本，最低 1）。core 不识别具体设施类型，只认数据字段。
   let cost = baseCost;
