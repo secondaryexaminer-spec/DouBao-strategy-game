@@ -71,7 +71,7 @@
     bavarianMountaineer: { name: "巴伐利亚山地弩手", icon: "⛰", level: 2, hp: 10, atk: 7, def: 2, move: 3, range: 2, cost: 40, domain: "land", faction: "hre", nation: "bavaria", text: "山地地形移动不消耗，驻扎山地射程+1。", tags: ["ambush"] },
     // === 金帐汗国（goldenHorde）联盟专属兵种 ===
     lightCavalry: { name: "轻骑兵", icon: "🐎", level: 1, hp: 12, atk: 6, def: 2, move: 6, range: 1, cost: 28, domain: "land", faction: "goldenHorde", text: "高机动骚扰与追击", tags: ["scout", "raider"] },
-    hordeCavalry: { name: "汗国骑兵", icon: "🐴", level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 42, domain: "land", faction: "goldenHorde", text: "通用机动打击", charge: 2, tags: ["raider"] },
+    hordeCavalry: { name: "汗国骑兵", icon: "🐴", level: 3, hp: 13, atk: 9, def: 4, move: 5, range: 1, cost: 38, domain: "land", faction: "goldenHorde", text: "轻骑突袭，更脆更狠的机动打击", charge: 2, tags: ["raider"] },
     horseArcher: { name: "骑射手", icon: "🥷", level: 2, hp: 11, atk: 6, def: 2, move: 4, range: 2, cost: 38, domain: "land", faction: "goldenHorde", text: "高机动骑射，打完就跑", tags: ["raider"] },
     nomadArcher: { name: "游牧弓手", icon: "🪃", level: 1, hp: 9, atk: 5, def: 1, move: 3, range: 2, cost: 30, domain: "land", faction: "goldenHorde", text: "边走边打的轻装弓手", tags: ["raider"] },
     fastGalley: { name: "快速桨帆船", icon: "🚤", level: 1, hp: 12, atk: 7, def: 2, move: 5, range: 2, cost: 32, domain: "sea", faction: "goldenHorde", text: "海上游击，高机动低血量", tags: ["raider"] },
@@ -105,7 +105,7 @@
     // === 大明帝国（ming）联盟专属兵种 ===
     shenjiBattalion: { name: "神机营火枪兵", icon: "🎇", level: 3, hp: 8, atk: 9, def: 1, move: 2, range: 3, cost: 48, domain: "land", faction: "ming", text: "火器齐射，攻击溅射50%到周围1格（大明本部60%）。", tags: ["artillery"] },
     qiArmy: { name: "戚家军", icon: "🥋", level: 2, hp: 16, atk: 7, def: 6, move: 3, range: 1, cost: 44, domain: "land", faction: "ming", text: "高防步兵，鸳鸯阵克制骑兵。", bonusVs: { cavalry: 3 }, tags: ["anti_cavalry"] },
-    mingCavalry: { name: "大明骑兵", icon: "🐅", level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 46, domain: "land", faction: "ming", text: "通用机动打击", charge: 2, tags: ["raider"] },
+    mingCavalry: { name: "大明骑兵", icon: "🐅", level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 44, domain: "land", faction: "ming", text: "辅助轻骑，冲锋乏力，大明主力靠火器", charge: 1, tags: ["raider"] },
     worksEngineer: { name: "工部工程师", icon: "🏗️", level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 46, domain: "land", faction: "ming", builder: true, text: "大明工程师，可造船与建营并部署工程设施（大明本部费用-10%）。", tags: ["engineer"] },
     treasureShip: { name: "宝船", icon: "🐉", level: 3, hp: 30, atk: 4, def: 5, move: 3, range: 1, cost: 60, domain: "sea", faction: "ming", transport: 10, text: "巨型运输船，可运10个陆军", tags: ["support"] },
     hongyiCannon: { name: "红夷大炮", icon: "☄️", level: 3, hp: 6, atk: 16, def: 1, move: 1, range: 5, cost: 64, domain: "land", faction: "ming", text: "超远程攻城，联盟最远单位", tags: ["siege", "artillery"] },
@@ -666,6 +666,12 @@
     if (atkNation === "veniceCore" && attackMeta.domain === "sea") nationAtk += 1;
     if (atkNation === "syria" && attackerFaction !== defenderFaction) nationAtk += 1;
     if (atkNation === "prussia" && !!getSite(game, toCell.x, toCell.y)) nationAtk += 3;
+    if (attacker.type === "imperialCrossbow") {
+      const heavy = ["heavyInfantry", "pikeSquare", "imperialGuard"];
+      if (game.units.some((u) => u.owner === attacker.owner && heavy.includes(u.type) && Math.abs(u.x - attacker.x) <= 1 && Math.abs(u.y - attacker.y) <= 1)) {
+        nationAtk += 1;
+      }
+    }
     if (getSite(game, toCell.x, toCell.y)) nationAtk += SIEGE_DAMAGE[attacker.type] || 0;
     if (defNation === "baghdad" && defender.type === "caliphScholar") nationDef += 2;
     const base = (attackMeta.atk + attackBuff + attacker.rank + elephantBonus + nationAtk) * attackHpFactor + charge;
@@ -1375,10 +1381,8 @@
   }
   function factionAdjustedCost(game, deps, owner, type, cargoTypes = []) {
     const base = isTransportType(type) ? transportCost(game, deps, cargoTypes, type) : typeMeta(type).cost;
-    const fac = owner === "player" ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
     const nat = owner === "player" ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
-    const typeFac = typeMeta(type).faction;
-    let markup = fac === "venice" && typeFac && typeFac !== "venice" ? 1.5 : 1;
+    let markup = 1;
     if (nat === "ragusa") markup *= 0.95;
     if (nat === "veniceCore" && typeMeta(type).domain === "sea") markup *= 0.8;
     if (nat === "mingCore" && (typeMeta(type).domain === "sea" || type === "engineer" || type === "worksEngineer")) markup *= 0.9;
@@ -1399,17 +1403,16 @@
     }
     const faction = ownerFaction(siteEntry.owner);
     const nation = ownerNation2(siteEntry.owner);
-    const isVenice = faction === "venice";
     return Object.keys(TYPES).filter((type) => {
       const meta = typeMeta(type);
       if (meta.domain !== domain || meta.level > siteEntry.tier) return false;
-      if (!isVenice && meta.faction && meta.faction !== faction) return false;
-      if (!isVenice && meta.nation && meta.nation !== nation) return false;
+      if (meta.faction && meta.faction !== faction) return false;
+      if (meta.nation && meta.nation !== nation) return false;
       return true;
     });
   }
   function buildAtSite(game, deps, owner, siteEntry, type, options = {}) {
-    const { getUnit: getUnit2, atUnitCap, buildBudgetLeft: buildBudgetLeft2, recordBuild: recordBuild2, log, ownerName, incrementStat, recordStatSnapshot } = deps;
+    const { getUnit: getUnit2, atUnitCap, buildBudgetLeft: buildBudgetLeft2, recordBuild: recordBuild2, log, ownerName, incrementStat, incrementStatByType, recordStatSnapshot } = deps;
     const cargoTypes = isTransportType(type) ? normalizeCargoTypes(game, deps, options.cargoTypes) : [];
     const totalCost = factionAdjustedCost(game, deps, owner, type, cargoTypes);
     const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
@@ -1427,11 +1430,13 @@
       game.units.push(created);
       log(`${ownerName(owner)}在${siteEntry.name}下水了${typeMeta(type).name}，预载 ${describeCargo(game, deps, cargoTypes)}。`, "system");
       incrementStat("produced", owner, 1 + cargoTypes.length);
+      if (incrementStatByType) incrementStatByType("producedByType", owner, type, 1 + cargoTypes.length);
     } else {
       created = unit(game, deps, type, owner, siteEntry.x, siteEntry.y);
       game.units.push(created);
       log(`${ownerName(owner)}在${siteEntry.name}部署了${typeMeta(type).name}。`, "system");
       incrementStat("produced", owner, 1);
+      if (incrementStatByType) incrementStatByType("producedByType", owner, type, 1);
     }
     recordStatSnapshot("build");
     eventBus.emit("productionCompleted", { owner, unit: created, site: siteEntry, kind: isTransportType(type) ? "ship" : "unit" });
@@ -4907,7 +4912,7 @@
       }
       return { w: width, h: height };
     }
-    const factoryDeps = { randomId, ownerName, log, getUnit: getUnit2, atUnitCap, buildBudgetLeft: buildBudgetLeft2, recordBuild: recordBuild2, incrementStat, recordStatSnapshot, ownerFaction, ownerNation: ownerNation2 };
+    const factoryDeps = { randomId, ownerName, log, getUnit: getUnit2, atUnitCap, buildBudgetLeft: buildBudgetLeft2, recordBuild: recordBuild2, incrementStat, incrementStatByType, recordStatSnapshot, ownerFaction, ownerNation: ownerNation2 };
     function unit2(type, owner, x, y) {
       return unit(game, factoryDeps, type, owner, x, y);
     }

@@ -596,7 +596,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
   }
 
   // ---- 单位/据点构造（抽取至 src/core/factory.js，行为零变化；依赖经 factoryDeps 注入原函数）----
-  const factoryDeps = { randomId, ownerName, log, getUnit, atUnitCap, buildBudgetLeft, recordBuild, incrementStat, recordStatSnapshot, ownerFaction, ownerNation };
+  const factoryDeps = { randomId, ownerName, log, getUnit, atUnitCap, buildBudgetLeft, recordBuild, incrementStat, incrementStatByType, recordStatSnapshot, ownerFaction, ownerNation };
 
   function unit(type, owner, x, y) { return factory.unit(game, factoryDeps, type, owner, x, y); }
 

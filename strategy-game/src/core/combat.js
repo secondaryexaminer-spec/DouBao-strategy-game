@@ -86,6 +86,15 @@ export function computeDamage(game, attacker, defender, fromCell, toCell, isCoun
   if (atkNation === 'veniceCore' && attackMeta.domain === 'sea') nationAtk += 1; // 威尼斯本部：海军攻击+1
   if (atkNation === 'syria' && attackerFaction !== defenderFaction) nationAtk += 1; // 叙利亚：对异联盟攻击+1
   if (atkNation === 'prussia' && !!getSite(game, toCell.x, toCell.y)) nationAtk += 3; // 普鲁士：对据点内单位伤害+3
+  // 阶段5：帝国弩手"阵地弩"——相邻己方重型单位（重甲/方阵/近卫）时攻击+1。
+  // 神罗阵地战协同；与普鲁士移动协同、巴伐利亚山地射程互不重复。
+  if (attacker.type === 'imperialCrossbow') {
+    const heavy = ['heavyInfantry', 'pikeSquare', 'imperialGuard'];
+    if (game.units.some(u => u.owner === attacker.owner && heavy.includes(u.type)
+        && Math.abs(u.x - attacker.x) <= 1 && Math.abs(u.y - attacker.y) <= 1)) {
+      nationAtk += 1;
+    }
+  }
   // 攻城器械：对据点驻军额外伤害（阶段4 补齐；与普鲁士+3 不同来源可叠加）
   if (getSite(game, toCell.x, toCell.y)) nationAtk += SIEGE_DAMAGE[attacker.type] || 0;
   if (defNation === 'baghdad' && defender.type === 'caliphScholar') nationDef += 2; // 巴格达：光环单位自身防御+2

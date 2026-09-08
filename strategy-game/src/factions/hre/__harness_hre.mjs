@@ -249,8 +249,8 @@ console.log('== G6 壕沟效果 ==');
   freshGame();
   ctx.createFacility('trench', 'player', 3, 3, { hp: 12, duration: 8 });
   const def = mkUnit('imperialCrossbow', 'player', 3, 3);
-  const cav = mkUnit('mingCavalry', 'enemy', 3, 4, { move: 5, maxMove: 5 });
-  const cav2 = mkUnit('mingCavalry', 'enemy', 3, 4, { move: 0, maxMove: 5, acted: true }); // 非冲锋
+  const cav = mkUnit('cavalry', 'enemy', 3, 4, { move: 5, maxMove: 5 });
+  const cav2 = mkUnit('cavalry', 'enemy', 3, 4, { move: 0, maxMove: 5, acted: true }); // 非冲锋
   game.units.push(def, cav, cav2);
 
   eq(beforeAttack(cav, def, 10).result.damage, 6, '壕沟：第一轮-2 + 冲锋-2 = 10-4');

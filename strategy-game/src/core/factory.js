@@ -143,10 +143,10 @@ export function transportCost(game, deps, cargoTypes = [], transportType = 'tran
 // 联盟/国家费用调整（四合一：威尼斯雇佣兵 1.5× / 拉古萨 0.95× / 威尼斯本部造船 0.8× / 大明本部造船建营 0.9×）
 export function factionAdjustedCost(game, deps, owner, type, cargoTypes = []) {
   const base = isTransportType(type) ? transportCost(game, deps, cargoTypes, type) : typeMeta(type).cost;
-  const fac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
   const nat = owner === 'player' ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
-  const typeFac = typeMeta(type).faction;
-  let markup = fac === 'venice' && typeFac && typeFac !== 'venice' ? 1.5 : 1;
+  // 阶段5：删除威尼斯"普通界面造异联盟兵 ×1.5"死代码（buildableTypes 已禁止威尼斯普通界面
+  // 造异联盟兵种；雇佣归口 tradeNetwork 雇佣兵市场，独立 MERCENARY.markup=1.5）。
+  let markup = 1;
   if (nat === 'ragusa') markup *= 0.95;
   // 威尼斯本部：造船费用-20%；大明本部：造船/建营费用-10%
   if (nat === 'veniceCore' && typeMeta(type).domain === 'sea') markup *= 0.8;
@@ -165,7 +165,7 @@ export function describeCargo(game, deps, cargoTypes = []) {
   return types.length ? types.map(type => typeMeta(type).name).join('、') : '空舱';
 }
 
-// 据点可建造兵种（联盟/国家过滤；威尼斯例外可造任意兵种）
+// 据点可建造兵种（联盟/国家过滤；异联盟兵种一律不可普通建造，威尼斯雇佣归口雇佣兵市场）
 export function buildableTypes(game, deps, siteEntry) {
   const { ownerFaction, ownerNation } = deps;
   const domain = siteMeta(siteEntry.kind).domain;
@@ -174,19 +174,18 @@ export function buildableTypes(game, deps, siteEntry) {
   }
   const faction = ownerFaction(siteEntry.owner);
   const nation = ownerNation(siteEntry.owner);
-  const isVenice = faction === 'venice';
   return Object.keys(TYPES).filter(type => {
     const meta = typeMeta(type);
     if (meta.domain !== domain || meta.level > siteEntry.tier) return false;
-    if (!isVenice && meta.faction && meta.faction !== faction) return false;
-    if (!isVenice && meta.nation && meta.nation !== nation) return false;
+    if (meta.faction && meta.faction !== faction) return false;
+    if (meta.nation && meta.nation !== nation) return false;
     return true;
   });
 }
 
 // 据点生产主入口：校验 → 扣费 → 构造并入队 → productionCompleted 事件
 export function buildAtSite(game, deps, owner, siteEntry, type, options = {}) {
-  const { getUnit, atUnitCap, buildBudgetLeft, recordBuild, log, ownerName, incrementStat, recordStatSnapshot } = deps;
+  const { getUnit, atUnitCap, buildBudgetLeft, recordBuild, log, ownerName, incrementStat, incrementStatByType, recordStatSnapshot } = deps;
   const cargoTypes = isTransportType(type) ? normalizeCargoTypes(game, deps, options.cargoTypes) : [];
   const totalCost = factionAdjustedCost(game, deps, owner, type, cargoTypes);
   const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
@@ -204,11 +203,13 @@ export function buildAtSite(game, deps, owner, siteEntry, type, options = {}) {
     game.units.push(created);
     log(`${ownerName(owner)}在${siteEntry.name}下水了${typeMeta(type).name}，预载 ${describeCargo(game, deps, cargoTypes)}。`, 'system');
     incrementStat('produced', owner, 1 + cargoTypes.length);
+    if (incrementStatByType) incrementStatByType('producedByType', owner, type, 1 + cargoTypes.length); // 阶段5：特色生产
   } else {
     created = unit(game, deps, type, owner, siteEntry.x, siteEntry.y);
     game.units.push(created);
     log(`${ownerName(owner)}在${siteEntry.name}部署了${typeMeta(type).name}。`, 'system');
     incrementStat('produced', owner, 1);
+    if (incrementStatByType) incrementStatByType('producedByType', owner, type, 1); // 阶段5：特色生产
   }
   recordStatSnapshot('build');
   // v0.2 GH-01：productionCompleted 实际埋点（契约 §2.2）。无订阅者时空转，零行为变化。
