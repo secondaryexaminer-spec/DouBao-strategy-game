@@ -19,6 +19,7 @@ import { createRng } from './core/rng.js';
 import { reachable } from './core/movement.js';
 import * as turn from './core/turn.js';
 import * as economy from './core/economy.js';
+import * as factory from './core/factory.js';
 import { eventBus } from './core/events.js';
 import { statusSystem } from './core/status.js';
 import { facilitySystem } from './core/facility.js';
@@ -548,64 +549,18 @@ import { mingSystem } from './factions/ming/mingRules.js';
     return { w: width, h: height };
   }
 
-  function unit(type, owner, x, y) {
-    const meta = typeMeta(type);
-    return {
-      id: randomId(),
-      type,
-      owner,
-      x,
-      y,
-      hp: meta.hp,
-      maxHp: meta.hp,
-      move: meta.move,
-      maxMove: meta.move,
-      baseMove: meta.move,
-      acted: false,
-      hasAttacked: false,
-      lastAttacked: false,
-      kills: 0,
-      rank: 0,
-      cargo: meta.transport ? [] : null
-    };
-  }
+  // ---- 单位/据点构造（抽取至 src/core/factory.js，行为零变化；依赖经 factoryDeps 注入原函数）----
+  const factoryDeps = { randomId, ownerName, log, getUnit, atUnitCap, buildBudgetLeft, recordBuild, incrementStat, recordStatSnapshot, ownerFaction, ownerNation };
 
-  function createCargoPayload(owner, type) {
-    return {
-      type,
-      owner,
-      hp: typeMeta(type).hp,
-      maxHp: typeMeta(type).hp,
-      lastAttacked: false
-    };
-  }
+  function unit(type, owner, x, y) { return factory.unit(game, factoryDeps, type, owner, x, y); }
 
-  function createLoadedTransport(owner, x, y, cargoTypes = [], transportType = 'transport') {
-    const transport = unit(transportType, owner, x, y);
-    transport.cargo = normalizeCargoTypes(cargoTypes, transportType).map(type => createCargoPayload(owner, type));
-    return transport;
-  }
+  function createCargoPayload(owner, type) { return factory.createCargoPayload(game, factoryDeps, owner, type); }
 
-  function site(kind, owner, x, y, name, tier = 1, income = null) {
-    return {
-      id: randomId(),
-      kind,
-      owner,
-      x,
-      y,
-      name,
-      tier,
-      income: income == null ? siteMeta(kind).income : income
-    };
-  }
+  function createLoadedTransport(owner, x, y, cargoTypes = [], transportType = 'transport') { return factory.createLoadedTransport(game, factoryDeps, owner, x, y, cargoTypes, transportType); }
 
-  function createCamp(owner, x, y) {
-    const camp = site('camp', owner, x, y, '临时营地', 2, 0);
-    const campNat = owner === 'player' ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
-    camp.duration = CAMP_DURATION + (campNat === 'goldenHordeCore' ? 2 : 0);
-    camp.uncapturable = true;
-    return camp;
-  }
+  function site(kind, owner, x, y, name, tier = 1, income = null) { return factory.site(game, factoryDeps, kind, owner, x, y, name, tier, income); }
+
+  function createCamp(owner, x, y) { return factory.createCamp(game, factoryDeps, owner, x, y); }
 
   function getUnit(x, y) {
     return game.units.find(entry => entry.x === x && entry.y === y);
@@ -687,16 +642,9 @@ import { mingSystem } from './factions/ming/mingRules.js';
     return game.sites.filter(entry => entry.kind === 'camp' && entry.owner === owner).length;
   }
 
-  function unitBuildCost(unitEntry) {
-    if (isTransportUnit(unitEntry)) {
-      return transportCost((unitEntry.cargo || []).map(payload => payload.type), unitEntry.type);
-    }
-    return typeMeta(unitEntry.type).cost;
-  }
+  function unitBuildCost(unitEntry) { return factory.unitBuildCost(game, factoryDeps, unitEntry); }
 
-  function sellRefund(unitEntry) {
-    return Math.floor(unitBuildCost(unitEntry) / 2);
-  }
+  function sellRefund(unitEntry) { return factory.sellRefund(game, factoryDeps, unitEntry); }
 
   function sellUnit(owner, unitEntry) {
     if (!unitEntry || unitEntry.owner !== owner || game.side !== owner || game.over) {
@@ -728,79 +676,29 @@ import { mingSystem } from './factions/ming/mingRules.js';
     return Math.max(landRatio, seaRatio);
   }
 
-  function cargoOptionTypes() {
-    return Object.keys(TYPES).filter(type => typeMeta(type).domain === 'land');
-  }
+  function cargoOptionTypes() { return factory.cargoOptionTypes(game, factoryDeps); }
 
-  function normalizeCargoTypes(types, transportType = 'transport') {
-    return (types || []).filter(type => type && type !== 'none' && TYPES[type] && typeMeta(type).domain === 'land').slice(0, typeMeta(transportType).transport);
-  }
+  function normalizeCargoTypes(types, transportType = 'transport') { return factory.normalizeCargoTypes(game, factoryDeps, types, transportType); }
 
   function sameCell(a, b) {
     return !!a && !!b && a.x === b.x && a.y === b.y;
   }
 
-  function rankFromKills(kills) {
-    let rank = 0;
-    for (let index = 0; index < UNIT_RANK_THRESHOLDS.length; index++) {
-      if (kills >= UNIT_RANK_THRESHOLDS[index]) {
-        rank = index;
-      }
-    }
-    return rank;
-  }
+  function rankFromKills(kills) { return factory.rankFromKills(game, factoryDeps, kills); }
 
-  function effectiveMove(unitEntry) {
-    // 阶段3 移除普鲁士恒定移动+1（重构为军阵协同，见 src/factions/hre/nationMechanics.js）
-    return unitEntry.baseMove + Math.floor(unitEntry.rank / 2);
-  }
+  function effectiveMove(unitEntry) { return factory.effectiveMove(game, factoryDeps, unitEntry); }
 
-  function healMultiplier(unitEntry) {
-    return 1 + unitEntry.rank * 0.15;
-  }
+  function healMultiplier(unitEntry) { return factory.healMultiplier(game, factoryDeps, unitEntry); }
 
-  function grantKills(unitEntry, kills) {
-    if (!unitEntry) {
-      return;
-    }
-    const killFac = unitEntry.owner === 'player' ? game.settings?.faction : game.aiProfiles?.[unitEntry.owner]?.faction;
-    const effectiveKills = killFac === 'mamluk' ? kills * 2 : kills;
-    unitEntry.kills += effectiveKills;
-    const nextRank = rankFromKills(unitEntry.kills);
-    if (nextRank !== unitEntry.rank) {
-      unitEntry.rank = nextRank;
-      unitEntry.maxMove = effectiveMove(unitEntry);
-      unitEntry.move = Math.max(unitEntry.move, Math.min(unitEntry.maxMove, unitEntry.move + 1));
-      log(`${ownerName(unitEntry.owner)}的${typeMeta(unitEntry.type).name}晋升为 ${nextRank} 级老兵。`, 'system');
-    }
-  }
+  function grantKills(unitEntry, kills) { return factory.grantKills(game, factoryDeps, unitEntry, kills); }
 
-  function transportCost(cargoTypes = [], transportType = 'transport') {
-    return typeMeta(transportType).cost + normalizeCargoTypes(cargoTypes, transportType).reduce((sum, type) => sum + typeMeta(type).cost, 0);
-  }
+  function transportCost(cargoTypes = [], transportType = 'transport') { return factory.transportCost(game, factoryDeps, cargoTypes, transportType); }
 
-  // 雇佣兵：威尼斯造非己方联盟兵种费用+50%；拉古萨：生产费用-5%
-  function factionAdjustedCost(owner, type, cargoTypes = []) {
-    const base = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
-    const fac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
-    const nat = owner === 'player' ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
-    const typeFac = typeMeta(type).faction;
-    let markup = fac === 'venice' && typeFac && typeFac !== 'venice' ? 1.5 : 1;
-    if (nat === 'ragusa') markup *= 0.95;
-    // 威尼斯本部：造船费用-20%；大明本部：造船/建营费用-10%
-    if (nat === 'veniceCore' && typeMeta(type).domain === 'sea') markup *= 0.8;
-    if (nat === 'mingCore' && (typeMeta(type).domain === 'sea' || type === 'engineer' || type === 'worksEngineer')) markup *= 0.9;
-    return Math.round(base * markup);
-  }
+  function factionAdjustedCost(owner, type, cargoTypes = []) { return factory.factionAdjustedCost(game, factoryDeps, owner, type, cargoTypes); }
 
-  function cargoLabel(type) {
-    return type === 'none' ? '空位' : `${typeMeta(type).icon} ${typeMeta(type).name}`;
-  }
+  function cargoLabel(type) { return factory.cargoLabel(game, factoryDeps, type); }
 
-  function describeCargo(cargoTypes = []) {
-    const types = normalizeCargoTypes(cargoTypes);
-    return types.length ? types.map(type => typeMeta(type).name).join('、') : '空舱';
-  }
+  function describeCargo(cargoTypes = []) { return factory.describeCargo(game, factoryDeps, cargoTypes); }
 
   function transportConfigMarkup(presetKey, title) {
     const capacity = typeMeta('transport').transport;
@@ -1285,22 +1183,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
     return game.aiProfiles?.[owner]?.nation;
   }
 
-  function buildableTypes(siteEntry) {
-    const domain = siteMeta(siteEntry.kind).domain;
-    if (!domain) {
-      return [];
-    }
-    const faction = ownerFaction(siteEntry.owner);
-    const nation = ownerNation(siteEntry.owner);
-    const isVenice = faction === 'venice';
-    return Object.keys(TYPES).filter(type => {
-      const meta = typeMeta(type);
-      if (meta.domain !== domain || meta.level > siteEntry.tier) return false;
-      if (!isVenice && meta.faction && meta.faction !== faction) return false;
-      if (!isVenice && meta.nation && meta.nation !== nation) return false;
-      return true;
-    });
-  }
+  function buildableTypes(siteEntry) { return factory.buildableTypes(game, factoryDeps, siteEntry); }
 
   function siteUpgradeCost(siteEntry) { return economy.siteUpgradeCost(game, economyDeps, siteEntry); }
 
@@ -1308,35 +1191,7 @@ import { mingSystem } from './factions/ming/mingRules.js';
 
   function recordBuild(owner, count) { return economy.recordBuild(game, economyDeps, owner, count); }
 
-  function buildAtSite(owner, siteEntry, type, options = {}) {
-    const cargoTypes = isTransportType(type) ? normalizeCargoTypes(options.cargoTypes) : [];
-    const totalCost = factionAdjustedCost(owner, type, cargoTypes);
-    const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
-    if (!siteEntry || siteEntry.owner !== owner || !buildableTypes(siteEntry).includes(type) || getUnit(siteEntry.x, siteEntry.y) || game.goldByOwner[owner] < totalCost) {
-      return false;
-    }
-    if (atUnitCap(owner, typeMeta(type).domain) || buildBudgetLeft(owner) < builtUnits) {
-      return false;
-    }
-    recordBuild(owner, builtUnits);
-    game.goldByOwner[owner] -= totalCost;
-    let created = null;
-    if (isTransportType(type)) {
-      created = createLoadedTransport(owner, siteEntry.x, siteEntry.y, cargoTypes, type);
-      game.units.push(created);
-      log(`${ownerName(owner)}在${siteEntry.name}下水了${typeMeta(type).name}，预载 ${describeCargo(cargoTypes)}。`, 'system');
-      incrementStat('produced', owner, 1 + cargoTypes.length);
-    } else {
-      created = unit(type, owner, siteEntry.x, siteEntry.y);
-      game.units.push(created);
-      log(`${ownerName(owner)}在${siteEntry.name}部署了${typeMeta(type).name}。`, 'system');
-      incrementStat('produced', owner, 1);
-    }
-    recordStatSnapshot('build');
-    // v0.2 GH-01：productionCompleted 实际埋点（契约 §2.2）。无订阅者时空转，零行为变化。
-    eventBus.emit('productionCompleted', { owner, unit: created, site: siteEntry, kind: isTransportType(type) ? 'ship' : 'unit' });
-    return true;
-  }
+  function buildAtSite(owner, siteEntry, type, options = {}) { return factory.buildAtSite(game, factoryDeps, owner, siteEntry, type, options); }
 
   function upgradeSite(owner, siteEntry) { return economy.upgradeSite(game, economyDeps, owner, siteEntry); }
 

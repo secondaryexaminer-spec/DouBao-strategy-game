@@ -357,7 +357,7 @@
     return Object.entries(COLOR_PRESETS);
   }
   var isTransportType = (type) => !!TYPES[type]?.transport;
-  var isTransportUnit = (unit) => !!unit?.type && !!TYPES[unit.type]?.transport;
+  var isTransportUnit = (unit2) => !!unit2?.type && !!TYPES[unit2.type]?.transport;
 
   // src/io/storage.js
   function createLocalStorageBackend() {
@@ -1057,7 +1057,7 @@
     return game.sites.filter((siteEntry) => areAllies2(siteEntry.owner, unitEntry.owner) && ((siteEntry.kind === "city" || siteEntry.kind === "camp" || siteEntry.kind === "barracksSmall" || siteEntry.kind === "barracksLarge") && typeMeta(unitEntry.type).domain === "land" || (siteEntry.kind === "shipyard" || siteEntry.kind === "fortress") && typeMeta(unitEntry.type).domain === "sea"));
   }
   function healOwner(game, deps, owner) {
-    const { healMultiplier } = deps;
+    const { healMultiplier: healMultiplier2 } = deps;
     for (const unitEntry of game.units.filter((entry) => entry.owner === owner)) {
       const supports = supportSites(game, deps, unitEntry);
       if (!supports.length) {
@@ -1066,7 +1066,7 @@
       }
       const nearest = Math.min(...supports.map((siteEntry) => dist(siteEntry, unitEntry)));
       if (!unitEntry.lastAttacked) {
-        const ratio = (nearest === 0 ? 0.16 : nearest <= 1 ? 0.1 : nearest >= 14 ? 0.02 : Math.max(0.02, 0.1 - (nearest - 1) * 0.08 / 13)) * healMultiplier(unitEntry);
+        const ratio = (nearest === 0 ? 0.16 : nearest <= 1 ? 0.1 : nearest >= 14 ? 0.02 : Math.max(0.02, 0.1 - (nearest - 1) * 0.08 / 13)) * healMultiplier2(unitEntry);
         const healNat = unitEntry.owner === "player" ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
         const bavariaBonus = healNat === "bavaria" ? 1 : 0;
         unitEntry.hp = Math.min(unitEntry.maxHp, unitEntry.hp + Math.max(1, Math.ceil(unitEntry.maxHp * ratio)) + bavariaBonus);
@@ -1139,6 +1139,177 @@
         log(`${ownerName(owner)}在${siteEntry.name}完成驻军修整。`, "system");
       }
     }
+  }
+
+  // src/core/factory.js
+  function unit(game, deps, type, owner, x, y) {
+    const { randomId } = deps;
+    const meta = typeMeta(type);
+    return {
+      id: randomId(),
+      type,
+      owner,
+      x,
+      y,
+      hp: meta.hp,
+      maxHp: meta.hp,
+      move: meta.move,
+      maxMove: meta.move,
+      baseMove: meta.move,
+      acted: false,
+      hasAttacked: false,
+      lastAttacked: false,
+      kills: 0,
+      rank: 0,
+      cargo: meta.transport ? [] : null
+    };
+  }
+  function createCargoPayload(game, deps, owner, type) {
+    return {
+      type,
+      owner,
+      hp: typeMeta(type).hp,
+      maxHp: typeMeta(type).hp,
+      lastAttacked: false
+    };
+  }
+  function createLoadedTransport(game, deps, owner, x, y, cargoTypes = [], transportType = "transport") {
+    const transport = unit(game, deps, transportType, owner, x, y);
+    transport.cargo = normalizeCargoTypes(game, deps, cargoTypes, transportType).map((type) => createCargoPayload(game, deps, owner, type));
+    return transport;
+  }
+  function site(game, deps, kind, owner, x, y, name, tier = 1, income = null) {
+    const { randomId } = deps;
+    return {
+      id: randomId(),
+      kind,
+      owner,
+      x,
+      y,
+      name,
+      tier,
+      income: income == null ? siteMeta(kind).income : income
+    };
+  }
+  function createCamp(game, deps, owner, x, y) {
+    const camp = site(game, deps, "camp", owner, x, y, "临时营地", 2, 0);
+    const campNat = owner === "player" ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
+    camp.duration = CAMP_DURATION + (campNat === "goldenHordeCore" ? 2 : 0);
+    camp.uncapturable = true;
+    return camp;
+  }
+  function unitBuildCost(game, deps, unitEntry) {
+    if (isTransportUnit(unitEntry)) {
+      return transportCost(game, deps, (unitEntry.cargo || []).map((payload) => payload.type), unitEntry.type);
+    }
+    return typeMeta(unitEntry.type).cost;
+  }
+  function sellRefund(game, deps, unitEntry) {
+    return Math.floor(unitBuildCost(game, deps, unitEntry) / 2);
+  }
+  function cargoOptionTypes(game, deps) {
+    return Object.keys(TYPES).filter((type) => typeMeta(type).domain === "land");
+  }
+  function normalizeCargoTypes(game, deps, types, transportType = "transport") {
+    return (types || []).filter((type) => type && type !== "none" && TYPES[type] && typeMeta(type).domain === "land").slice(0, typeMeta(transportType).transport);
+  }
+  function rankFromKills(game, deps, kills) {
+    let rank = 0;
+    for (let index = 0; index < UNIT_RANK_THRESHOLDS.length; index++) {
+      if (kills >= UNIT_RANK_THRESHOLDS[index]) {
+        rank = index;
+      }
+    }
+    return rank;
+  }
+  function effectiveMove(game, deps, unitEntry) {
+    return unitEntry.baseMove + Math.floor(unitEntry.rank / 2);
+  }
+  function healMultiplier(game, deps, unitEntry) {
+    return 1 + unitEntry.rank * 0.15;
+  }
+  function grantKills(game, deps, unitEntry, kills) {
+    const { ownerName, log } = deps;
+    if (!unitEntry) {
+      return;
+    }
+    const killFac = unitEntry.owner === "player" ? game.settings?.faction : game.aiProfiles?.[unitEntry.owner]?.faction;
+    const effectiveKills = killFac === "mamluk" ? kills * 2 : kills;
+    unitEntry.kills += effectiveKills;
+    const nextRank = rankFromKills(game, deps, unitEntry.kills);
+    if (nextRank !== unitEntry.rank) {
+      unitEntry.rank = nextRank;
+      unitEntry.maxMove = effectiveMove(game, deps, unitEntry);
+      unitEntry.move = Math.max(unitEntry.move, Math.min(unitEntry.maxMove, unitEntry.move + 1));
+      log(`${ownerName(unitEntry.owner)}的${typeMeta(unitEntry.type).name}晋升为 ${nextRank} 级老兵。`, "system");
+    }
+  }
+  function transportCost(game, deps, cargoTypes = [], transportType = "transport") {
+    return typeMeta(transportType).cost + normalizeCargoTypes(game, deps, cargoTypes, transportType).reduce((sum, type) => sum + typeMeta(type).cost, 0);
+  }
+  function factionAdjustedCost(game, deps, owner, type, cargoTypes = []) {
+    const base = isTransportType(type) ? transportCost(game, deps, cargoTypes, type) : typeMeta(type).cost;
+    const fac = owner === "player" ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+    const nat = owner === "player" ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
+    const typeFac = typeMeta(type).faction;
+    let markup = fac === "venice" && typeFac && typeFac !== "venice" ? 1.5 : 1;
+    if (nat === "ragusa") markup *= 0.95;
+    if (nat === "veniceCore" && typeMeta(type).domain === "sea") markup *= 0.8;
+    if (nat === "mingCore" && (typeMeta(type).domain === "sea" || type === "engineer" || type === "worksEngineer")) markup *= 0.9;
+    return Math.round(base * markup);
+  }
+  function cargoLabel(game, deps, type) {
+    return type === "none" ? "空位" : `${typeMeta(type).icon} ${typeMeta(type).name}`;
+  }
+  function describeCargo(game, deps, cargoTypes = []) {
+    const types = normalizeCargoTypes(game, deps, cargoTypes);
+    return types.length ? types.map((type) => typeMeta(type).name).join("、") : "空舱";
+  }
+  function buildableTypes(game, deps, siteEntry) {
+    const { ownerFaction, ownerNation: ownerNation2 } = deps;
+    const domain = siteMeta(siteEntry.kind).domain;
+    if (!domain) {
+      return [];
+    }
+    const faction = ownerFaction(siteEntry.owner);
+    const nation = ownerNation2(siteEntry.owner);
+    const isVenice = faction === "venice";
+    return Object.keys(TYPES).filter((type) => {
+      const meta = typeMeta(type);
+      if (meta.domain !== domain || meta.level > siteEntry.tier) return false;
+      if (!isVenice && meta.faction && meta.faction !== faction) return false;
+      if (!isVenice && meta.nation && meta.nation !== nation) return false;
+      return true;
+    });
+  }
+  function buildAtSite(game, deps, owner, siteEntry, type, options = {}) {
+    const { getUnit: getUnit2, atUnitCap, buildBudgetLeft: buildBudgetLeft2, recordBuild: recordBuild2, log, ownerName, incrementStat, recordStatSnapshot } = deps;
+    const cargoTypes = isTransportType(type) ? normalizeCargoTypes(game, deps, options.cargoTypes) : [];
+    const totalCost = factionAdjustedCost(game, deps, owner, type, cargoTypes);
+    const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
+    if (!siteEntry || siteEntry.owner !== owner || !buildableTypes(game, deps, siteEntry).includes(type) || getUnit2(siteEntry.x, siteEntry.y) || game.goldByOwner[owner] < totalCost) {
+      return false;
+    }
+    if (atUnitCap(owner, typeMeta(type).domain) || buildBudgetLeft2(owner) < builtUnits) {
+      return false;
+    }
+    recordBuild2(owner, builtUnits);
+    game.goldByOwner[owner] -= totalCost;
+    let created = null;
+    if (isTransportType(type)) {
+      created = createLoadedTransport(game, deps, owner, siteEntry.x, siteEntry.y, cargoTypes, type);
+      game.units.push(created);
+      log(`${ownerName(owner)}在${siteEntry.name}下水了${typeMeta(type).name}，预载 ${describeCargo(game, deps, cargoTypes)}。`, "system");
+      incrementStat("produced", owner, 1 + cargoTypes.length);
+    } else {
+      created = unit(game, deps, type, owner, siteEntry.x, siteEntry.y);
+      game.units.push(created);
+      log(`${ownerName(owner)}在${siteEntry.name}部署了${typeMeta(type).name}。`, "system");
+      incrementStat("produced", owner, 1);
+    }
+    recordStatSnapshot("build");
+    eventBus.emit("productionCompleted", { owner, unit: created, site: siteEntry, kind: isTransportType(type) ? "ship" : "unit" });
+    return true;
   }
 
   // src/core/status.js
@@ -1417,9 +1588,9 @@
   function isHreOwner(ctx, owner) {
     return !!owner && ctx.ownerFaction(owner) === "hre";
   }
-  function isBuilderUnit(ctx, unit) {
-    if (!unit || !isHreOwner(ctx, unit.owner)) return false;
-    const meta = ctx.typeMeta(unit.type);
+  function isBuilderUnit(ctx, unit2) {
+    if (!unit2 || !isHreOwner(ctx, unit2.owner)) return false;
+    const meta = ctx.typeMeta(unit2.type);
     if (!meta) return false;
     if (meta.domain !== "land") return false;
     if (meta.charge) return false;
@@ -1431,29 +1602,29 @@
     const t = g.terrain[y] && g.terrain[y][x];
     return !!t && t !== "water" && t !== "mountain";
   }
-  function nearSupportSite(ctx, unit) {
+  function nearSupportSite(ctx, unit2) {
     for (const s of ctx.game.sites) {
       if (!FORT_SUPPORT_KINDS.has(s.kind)) continue;
-      if (!ctx.areAllies(ctx.game.teams, s.owner, unit.owner)) continue;
-      if (ctx.diagonalDist(s, unit) <= STONE_FORT_RANGE) return true;
+      if (!ctx.areAllies(ctx.game.teams, s.owner, unit2.owner)) continue;
+      if (ctx.diagonalDist(s, unit2) <= STONE_FORT_RANGE) return true;
     }
     return false;
   }
-  function canBuildAt(ctx, unit, type) {
+  function canBuildAt(ctx, unit2, type) {
     const def = FORTIFICATIONS[type];
     if (!def) return false;
-    if (!isBuilderUnit(ctx, unit)) return false;
-    if (!isLandCell(ctx, unit.x, unit.y)) return false;
-    if (ctx.getSite(unit.x, unit.y)) return false;
-    if (ctx.getFacilityAt(unit.x, unit.y)) return false;
-    if ((ctx.game.goldByOwner[unit.owner] || 0) < def.cost) return false;
-    if (type === "stoneFort" && !nearSupportSite(ctx, unit)) return false;
+    if (!isBuilderUnit(ctx, unit2)) return false;
+    if (!isLandCell(ctx, unit2.x, unit2.y)) return false;
+    if (ctx.getSite(unit2.x, unit2.y)) return false;
+    if (ctx.getFacilityAt(unit2.x, unit2.y)) return false;
+    if ((ctx.game.goldByOwner[unit2.owner] || 0) < def.cost) return false;
+    if (type === "stoneFort" && !nearSupportSite(ctx, unit2)) return false;
     return true;
   }
-  function buildOptionsFor(ctx, unit) {
+  function buildOptionsFor(ctx, unit2) {
     const options = [{ id: "none", label: "不建", description: "保留金币与本回合行动，不建造工事。" }];
-    if (!isBuilderUnit(ctx, unit)) return options;
-    const gold = ctx.game.goldByOwner[unit.owner] || 0;
+    if (!isBuilderUnit(ctx, unit2)) return options;
+    const gold = ctx.game.goldByOwner[unit2.owner] || 0;
     if (gold >= FORTIFICATIONS.palisade.cost) {
       const d = FORTIFICATIONS.palisade;
       options.push({ id: d.id, label: `建${d.label}`, description: `${d.desc}（${d.cost}金币，持续${d.duration}回合）` });
@@ -1462,28 +1633,28 @@
       const d = FORTIFICATIONS.trench;
       options.push({ id: d.id, label: `建${d.label}`, description: `${d.desc}（${d.cost}金币，持续${d.duration}回合）` });
     }
-    if (gold >= FORTIFICATIONS.stoneFort.cost && nearSupportSite(ctx, unit)) {
+    if (gold >= FORTIFICATIONS.stoneFort.cost && nearSupportSite(ctx, unit2)) {
       const d = FORTIFICATIONS.stoneFort;
       options.push({ id: d.id, label: `建${d.label}`, description: `${d.desc}（${d.cost}金币，永久）` });
     }
     return options;
   }
-  function requestBuildDecision(ctx, unit) {
-    if (!unit || !isBuilderUnit(ctx, unit)) return null;
-    if (!isLandCell(ctx, unit.x, unit.y)) return null;
-    if (ctx.getSite(unit.x, unit.y)) return null;
-    if (ctx.getFacilityAt(unit.x, unit.y)) return null;
-    if ((ctx.game.goldByOwner[unit.owner] || 0) < FORTIFICATIONS.palisade.cost) return null;
-    const options = buildOptionsFor(ctx, unit);
+  function requestBuildDecision(ctx, unit2) {
+    if (!unit2 || !isBuilderUnit(ctx, unit2)) return null;
+    if (!isLandCell(ctx, unit2.x, unit2.y)) return null;
+    if (ctx.getSite(unit2.x, unit2.y)) return null;
+    if (ctx.getFacilityAt(unit2.x, unit2.y)) return null;
+    if ((ctx.game.goldByOwner[unit2.owner] || 0) < FORTIFICATIONS.palisade.cost) return null;
+    const options = buildOptionsFor(ctx, unit2);
     if (options.length <= 1) return null;
-    const owner = unit.owner;
-    const unitId = unit.id;
+    const owner = unit2.owner;
+    const unitId = unit2.id;
     const decisionId = `hreFort_${unitId}`;
     return ctx.requestDecision(decisionId, {
       owner,
       unitId,
       title: "帝国工事",
-      description: `${ctx.typeMeta(unit.type).name}可在此格建造工事（消耗本回合行动并花费金币）。`,
+      description: `${ctx.typeMeta(unit2.type).name}可在此格建造工事（消耗本回合行动并花费金币）。`,
       options,
       onResolve: (choiceId) => {
         resolveBuild(ctx, owner, unitId, choiceId);
@@ -1491,22 +1662,22 @@
     });
   }
   function resolveBuild(ctx, owner, unitId, choiceId) {
-    const unit = ctx.game.units.find((u) => u.id === unitId);
-    if (!unit || unit.owner !== owner) return false;
+    const unit2 = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit2 || unit2.owner !== owner) return false;
     if (!choiceId || choiceId === "none") return false;
     const def = FORTIFICATIONS[choiceId];
     if (!def) return false;
-    if (!canBuildAt(ctx, unit, choiceId)) {
-      ctx.log(`${ctx.typeMeta(unit.type).name}无法在此格建造${def.label}（条件不再满足）。`, "warning");
+    if (!canBuildAt(ctx, unit2, choiceId)) {
+      ctx.log(`${ctx.typeMeta(unit2.type).name}无法在此格建造${def.label}（条件不再满足）。`, "warning");
       return false;
     }
     if (!ctx.spendGold(owner, def.cost)) return false;
-    const fac = ctx.createFacility(choiceId, owner, unit.x, unit.y, { hp: def.hp, duration: def.duration });
+    const fac = ctx.createFacility(choiceId, owner, unit2.x, unit2.y, { hp: def.hp, duration: def.duration });
     state.baseMaxHp.set(fac.id, def.hp);
-    unit.acted = true;
-    unit.move = 0;
-    unit.hasAttacked = true;
-    ctx.log(`${ctx.typeMeta(unit.type).name}在（${unit.x},${unit.y}）建立了${def.label}，帝国防线扩展。`, "system");
+    unit2.acted = true;
+    unit2.move = 0;
+    unit2.hasAttacked = true;
+    ctx.log(`${ctx.typeMeta(unit2.type).name}在（${unit2.x},${unit2.y}）建立了${def.label}，帝国防线扩展。`, "system");
     return true;
   }
   function computeFrontline(ctx, owner) {
@@ -1580,24 +1751,24 @@
         if (wasFront) ctx.log("阵线失稳：该段工事失去阵线加固。", "warning");
       }
     }
-    for (const unit of ctx.game.units) {
-      if (!isHreOwner(ctx, unit.owner)) continue;
-      if (onFrontline.has(unit.id)) {
-        ctx.addStatus(unit.id, "frontline", 1, { owner });
-        if (!initial && unit.hp < unit.maxHp) {
-          unit.hp = Math.min(unit.maxHp, unit.hp + FRONTLINE_HEAL);
+    for (const unit2 of ctx.game.units) {
+      if (!isHreOwner(ctx, unit2.owner)) continue;
+      if (onFrontline.has(unit2.id)) {
+        ctx.addStatus(unit2.id, "frontline", 1, { owner });
+        if (!initial && unit2.hp < unit2.maxHp) {
+          unit2.hp = Math.min(unit2.maxHp, unit2.hp + FRONTLINE_HEAL);
         }
       } else {
-        ctx.removeStatus(unit.id, "frontline");
+        ctx.removeStatus(unit2.id, "frontline");
       }
     }
     if (!initial) {
       for (const f of facilities2) {
         if (f.type !== "stoneFort") continue;
-        for (const unit of ctx.game.units) {
-          if (!isHreOwner(ctx, unit.owner)) continue;
-          if (ctx.diagonalDist(unit, f) <= 1 && unit.hp < unit.maxHp) {
-            unit.hp = Math.min(unit.maxHp, unit.hp + STONE_FORT_HEAL);
+        for (const unit2 of ctx.game.units) {
+          if (!isHreOwner(ctx, unit2.owner)) continue;
+          if (ctx.diagonalDist(unit2, f) <= 1 && unit2.hp < unit2.maxHp) {
+            unit2.hp = Math.min(unit2.maxHp, unit2.hp + STONE_FORT_HEAL);
           }
         }
       }
@@ -1620,27 +1791,27 @@
     state.trenchFirstHit.clear();
     state.pikeGuardUsed.clear();
     if (owner === "player") {
-      for (const unit of ctx.game.units) {
-        if (unit.owner !== owner) continue;
-        requestBuildDecision(ctx, unit);
+      for (const unit2 of ctx.game.units) {
+        if (unit2.owner !== owner) continue;
+        requestBuildDecision(ctx, unit2);
       }
     }
   }
   function onBeforeMove(ctx, payload) {
-    const { unit, from, to } = payload || {};
-    if (!unit || !to || !from) return;
-    if (isHreOwner(ctx, unit.owner)) return;
-    if (unit.move <= 0) return;
+    const { unit: unit2, from, to } = payload || {};
+    if (!unit2 || !to || !from) return;
+    if (isHreOwner(ctx, unit2.owner)) return;
+    if (unit2.move <= 0) return;
     const fac = ctx.getFacilityAt(to.x, to.y);
     if (!fac || fac.type !== "palisade" || !isHreOwner(ctx, fac.owner)) return;
-    if (ctx.areAllies(ctx.game.teams, unit.owner, fac.owner)) return;
-    const step = ctx.movementCost(ctx.game, unit, to.x, to.y);
+    if (ctx.areAllies(ctx.game.teams, unit2.owner, fac.owner)) return;
+    const step = ctx.movementCost(ctx.game, unit2, to.x, to.y);
     const stepCost = to.x !== from.x && to.y !== from.y ? step * Math.SQRT2 : step;
-    if (unit.move < stepCost + 1) {
+    if (unit2.move < stepCost + 1) {
       payload.cancel = true;
       return;
     }
-    unit.move -= 1;
+    unit2.move -= 1;
   }
   function reduceDamage(damage, n) {
     return Math.max(1, damage - n);
@@ -1671,9 +1842,9 @@
       if (u.type !== "imperialGuard") continue;
       if (!isHreOwner(ctx, u.owner)) continue;
       if (ctx.diagonalDist(u, defender) > 1) continue;
-      const site = ctx.getSite(u.x, u.y);
-      if (!site) continue;
-      if (!ctx.areAllies(ctx.game.teams, site.owner, u.owner)) continue;
+      const site2 = ctx.getSite(u.x, u.y);
+      if (!site2) continue;
+      if (!ctx.areAllies(ctx.game.teams, site2.owner, u.owner)) continue;
       return true;
     }
     return false;
@@ -1798,11 +1969,11 @@
     resetState2();
     state2.lastGameRef = null;
   }
-  function hasFriendlyAdjacent(ctx, unit) {
+  function hasFriendlyAdjacent(ctx, unit2) {
     for (const other of ctx.game.units) {
-      if (other === unit) continue;
-      if (!ctx.areAllies(ctx.game.teams, unit.owner, other.owner)) continue;
-      if (Math.abs(other.x - unit.x) <= 1 && Math.abs(other.y - unit.y) <= 1) return true;
+      if (other === unit2) continue;
+      if (!ctx.areAllies(ctx.game.teams, unit2.owner, other.owner)) continue;
+      if (Math.abs(other.x - unit2.x) <= 1 && Math.abs(other.y - unit2.y) <= 1) return true;
     }
     return false;
   }
@@ -1811,16 +1982,16 @@
     state2.prussiaFormationUsed.clear();
   }
   function onBeforeMove2(ctx, payload) {
-    const { unit } = payload || {};
-    if (!unit) return;
+    const { unit: unit2 } = payload || {};
+    if (!unit2) return;
     syncGameRef2(ctx);
-    if (ctx.ownerNation(unit.owner) !== "prussia") return;
-    if (unit.move <= 0) return;
-    if (state2.prussiaFormationUsed.has(unit.id)) return;
-    if (!hasFriendlyAdjacent(ctx, unit)) return;
-    state2.prussiaFormationUsed.add(unit.id);
-    unit.move = unit.move + HRE_NATION.prussiaFormationMove;
-    ctx.log(`${ctx.typeMeta(unit.type).name}与友军列阵协同推进，本次移动消耗 -1。`, "system");
+    if (ctx.ownerNation(unit2.owner) !== "prussia") return;
+    if (unit2.move <= 0) return;
+    if (state2.prussiaFormationUsed.has(unit2.id)) return;
+    if (!hasFriendlyAdjacent(ctx, unit2)) return;
+    state2.prussiaFormationUsed.add(unit2.id);
+    unit2.move = unit2.move + HRE_NATION.prussiaFormationMove;
+    ctx.log(`${ctx.typeMeta(unit2.type).name}与友军列阵协同推进，本次移动消耗 -1。`, "system");
   }
   function onBeforeAttack2(ctx, payload) {
     const { defender, result } = payload || {};
@@ -1921,17 +2092,17 @@
   function isGoldenHordeOwner(ctx, owner) {
     return !!owner && ctx.ownerFaction(owner) === "goldenHorde";
   }
-  function isGoldenHordeUnit(ctx, unit) {
-    return !!unit && isGoldenHordeOwner(ctx, unit.owner);
+  function isGoldenHordeUnit(ctx, unit2) {
+    return !!unit2 && isGoldenHordeOwner(ctx, unit2.owner);
   }
-  function isTradeTarget(ctx, unit) {
-    if (!unit) return false;
-    if (TRADE_TYPES.has(unit.type)) return true;
-    const meta = ctx.typeMeta(unit.type);
+  function isTradeTarget(ctx, unit2) {
+    if (!unit2) return false;
+    if (TRADE_TYPES.has(unit2.type)) return true;
+    const meta = ctx.typeMeta(unit2.type);
     return !!(meta && meta.transport);
   }
-  function raidPower(ctx, unit) {
-    const meta = ctx.typeMeta(unit.type);
+  function raidPower(ctx, unit2) {
+    const meta = ctx.typeMeta(unit2.type);
     if (!meta) return 0;
     return (meta.move >= RAID_POWER_MOVE_MIN ? 1 : 0) + (meta.level >= RAID_POWER_LEVEL_MIN ? 1 : 0);
   }
@@ -1942,10 +2113,10 @@
     return RAID_LOOT.normal;
   }
   function siteBonusFor(ctx, attacker, defender) {
-    const site = ctx.getSite(defender.x, defender.y);
-    if (!site) return 0;
-    if (site.owner === "neutral") return 0;
-    if (ctx.areAllies(ctx.game.teams, site.owner, attacker.owner)) return 0;
+    const site2 = ctx.getSite(defender.x, defender.y);
+    if (!site2) return 0;
+    if (site2.owner === "neutral") return 0;
+    if (ctx.areAllies(ctx.game.teams, site2.owner, attacker.owner)) return 0;
     return RAID_LOOT.siteBonus;
   }
   function onAfterAttack2(ctx, payload) {
@@ -1968,19 +2139,19 @@
     }
   }
   function onBeforeMove3(ctx, payload) {
-    const { unit, from, to } = payload || {};
-    if (!unit || !to || !from) return;
-    if (unit.move <= 0) return;
-    if (!ctx.hasStatus(unit.id, RAIDED_KEY)) return;
-    if (state3.slowUsedThisTurn.has(unit.id)) return;
-    const step = ctx.movementCost(ctx.game, unit, to.x, to.y);
+    const { unit: unit2, from, to } = payload || {};
+    if (!unit2 || !to || !from) return;
+    if (unit2.move <= 0) return;
+    if (!ctx.hasStatus(unit2.id, RAIDED_KEY)) return;
+    if (state3.slowUsedThisTurn.has(unit2.id)) return;
+    const step = ctx.movementCost(ctx.game, unit2, to.x, to.y);
     const stepCost = to.x !== from.x && to.y !== from.y ? step * Math.SQRT2 : step;
-    if (unit.move < stepCost + 1) {
+    if (unit2.move < stepCost + 1) {
       payload.cancel = true;
       return;
     }
-    unit.move -= 1;
-    state3.slowUsedThisTurn.add(unit.id);
+    unit2.move -= 1;
+    state3.slowUsedThisTurn.add(unit2.id);
   }
   function onTurnStart3(ctx, payload) {
     syncGameRef3(ctx);
@@ -2053,10 +2224,10 @@
   function inOasisNetwork(ctx, x, y, range = GOLDEN_HORDE_NATION.oasisRange) {
     return oasisNodes(ctx).some((s) => Math.abs(s.x - x) <= range && Math.abs(s.y - y) <= range);
   }
-  function isAmbushTerrain(ctx, unit) {
+  function isAmbushTerrain(ctx, unit2) {
     const g = ctx.game;
-    if (!g.terrain || !g.terrain[unit.y]) return false;
-    return GOLDEN_HORDE_NATION.ambushTerrains.includes(g.terrain[unit.y][unit.x]);
+    if (!g.terrain || !g.terrain[unit2.y]) return false;
+    return GOLDEN_HORDE_NATION.ambushTerrains.includes(g.terrain[unit2.y][unit2.x]);
   }
   function onTurnStart4(ctx, payload) {
     const owner = payload && payload.owner;
@@ -2185,16 +2356,16 @@
   function myCamps(ctx, owner) {
     return ctx.getFacilitiesByType(NOMAD_CAMP.type).filter((f) => f.owner === owner);
   }
-  function canBuildCampAt(ctx, unit) {
-    if (!unit || !isGoldenHordeOwner(ctx, unit.owner)) return false;
-    const meta = ctx.typeMeta(unit.type);
+  function canBuildCampAt(ctx, unit2) {
+    if (!unit2 || !isGoldenHordeOwner(ctx, unit2.owner)) return false;
+    const meta = ctx.typeMeta(unit2.type);
     if (!meta || meta.domain !== "land") return false;
-    if (unit.acted || unit.hasAttacked) return false;
-    if (!isLandCell2(ctx, unit.x, unit.y)) return false;
-    if (ctx.getSite(unit.x, unit.y)) return false;
-    if (ctx.getFacilityAt(unit.x, unit.y)) return false;
-    if ((ctx.game.goldByOwner[unit.owner] || 0) < NOMAD_CAMP.buildCost) return false;
-    if (campCount(ctx, unit.owner) >= NOMAD_CAMP.maxCamps) return false;
+    if (unit2.acted || unit2.hasAttacked) return false;
+    if (!isLandCell2(ctx, unit2.x, unit2.y)) return false;
+    if (ctx.getSite(unit2.x, unit2.y)) return false;
+    if (ctx.getFacilityAt(unit2.x, unit2.y)) return false;
+    if ((ctx.game.goldByOwner[unit2.owner] || 0) < NOMAD_CAMP.buildCost) return false;
+    if (campCount(ctx, unit2.owner) >= NOMAD_CAMP.maxCamps) return false;
     return true;
   }
   function isValidCampCell(ctx, x, y) {
@@ -2204,20 +2375,20 @@
     if (ctx.getUnit(x, y)) return false;
     return true;
   }
-  function requestBuildDecision2(ctx, unit) {
-    if (!canBuildCampAt(ctx, unit)) return null;
+  function requestBuildDecision2(ctx, unit2) {
+    if (!canBuildCampAt(ctx, unit2)) return null;
     const options = [
       { id: "none", label: "不建", description: "保留金币与本回合行动，不建立营地。" },
       { id: "build", label: "建游牧营地", description: `${NOMAD_CAMP.buildCost}金币，存在${NOMAD_CAMP.duration}回合，每回合${NOMAD_CAMP.upkeep}金币维护。` }
     ];
-    const owner = unit.owner;
-    const unitId = unit.id;
+    const owner = unit2.owner;
+    const unitId = unit2.id;
     const decisionId = `ghCampBuild_${unitId}`;
     return ctx.requestDecision(decisionId, {
       owner,
       unitId,
       title: "游牧营地",
-      description: `${ctx.typeMeta(unit.type).name}可在此格建立游牧营地（消耗本回合行动并花费金币）。`,
+      description: `${ctx.typeMeta(unit2.type).name}可在此格建立游牧营地（消耗本回合行动并花费金币）。`,
       options,
       onResolve: (choiceId) => {
         resolveBuild2(ctx, owner, unitId, choiceId);
@@ -2226,24 +2397,24 @@
   }
   function resolveBuild2(ctx, owner, unitId, choiceId) {
     if (!choiceId || choiceId === "none") return false;
-    const unit = ctx.game.units.find((u) => u.id === unitId);
-    if (!unit || unit.owner !== owner) return false;
-    if (!canBuildCampAt(ctx, unit)) {
+    const unit2 = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit2 || unit2.owner !== owner) return false;
+    if (!canBuildCampAt(ctx, unit2)) {
       ctx.log("营地建造条件不再满足（金币/占位/上限变化）。", "warning");
       return false;
     }
     if (!ctx.spendGold(owner, NOMAD_CAMP.buildCost)) return false;
     const natBonus = ctx.ownerNation(owner) === "goldenHordeCore" ? 2 : 0;
-    const oasisBonus = inOasisNetwork(ctx, unit.x, unit.y) ? 1 : 0;
+    const oasisBonus = inOasisNetwork(ctx, unit2.x, unit2.y) ? 1 : 0;
     const totalDuration = NOMAD_CAMP.duration + natBonus + oasisBonus;
-    const fac = ctx.createFacility(NOMAD_CAMP.type, owner, unit.x, unit.y, {
+    const fac = ctx.createFacility(NOMAD_CAMP.type, owner, unit2.x, unit2.y, {
       duration: totalDuration,
       data: { builtTurn: ctx.game.turn }
     });
-    unit.acted = true;
-    unit.move = 0;
-    unit.hasAttacked = true;
-    ctx.log(`${ctx.typeMeta(unit.type).name}在（${unit.x},${unit.y}）建立了游牧营地，可维持 ${totalDuration} 回合。`, "system");
+    unit2.acted = true;
+    unit2.move = 0;
+    unit2.hasAttacked = true;
+    ctx.log(`${ctx.typeMeta(unit2.type).name}在（${unit2.x},${unit2.y}）建立了游牧营地，可维持 ${totalDuration} 回合。`, "system");
     return !!fac;
   }
   function migrateCandidates(ctx, camp) {
@@ -2352,9 +2523,9 @@
       }
     }
     if (owner === "player") {
-      for (const unit of ctx.game.units) {
-        if (unit.owner === owner && canBuildCampAt(ctx, unit)) {
-          requestBuildDecision2(ctx, unit);
+      for (const unit2 of ctx.game.units) {
+        if (unit2.owner === owner && canBuildCampAt(ctx, unit2)) {
+          requestBuildDecision2(ctx, unit2);
         }
       }
       for (const camp of myCamps(ctx, owner)) {
@@ -2752,26 +2923,26 @@
     return newStatus;
   }
   function onBeforeMove4(ctx, payload) {
-    const { unit, to } = payload || {};
-    if (!unit || !to) return;
+    const { unit: unit2, to } = payload || {};
+    if (!unit2 || !to) return;
     for (const route of ctx.getFacilitiesByType(TRADE_ROUTE.type)) {
-      if (ctx.areAllies(ctx.game.teams, unit.owner, route.owner)) continue;
+      if (ctx.areAllies(ctx.game.teams, unit2.owner, route.owner)) continue;
       const d = route.data || {};
       if (d.status === "disrupted") continue;
       if ((d.path || []).some((c) => c.x === to.x && c.y === to.y)) {
         d.status = "disrupted";
-        ctx.log(`${typeLabel(ctx, unit.type)}进入${routeLabel(route)}，贸易路线被切断！`, "warning");
+        ctx.log(`${typeLabel(ctx, unit2.type)}进入${routeLabel(route)}，贸易路线被切断！`, "warning");
       }
     }
   }
   function onSiteCaptured(ctx, payload) {
-    const { unit, site } = payload || {};
-    if (!unit || !site) return;
+    const { unit: unit2, site: site2 } = payload || {};
+    if (!unit2 || !site2) return;
     for (const route of ctx.getFacilitiesByType(TRADE_ROUTE.type)) {
-      if (ctx.areAllies(ctx.game.teams, unit.owner, route.owner)) continue;
+      if (ctx.areAllies(ctx.game.teams, unit2.owner, route.owner)) continue;
       const d = route.data || {};
       if (d.status === "disrupted") continue;
-      if ((d.path || []).some((c) => c.x === site.x && c.y === site.y)) {
+      if ((d.path || []).some((c) => c.x === site2.x && c.y === site2.y)) {
         d.status = "disrupted";
         ctx.log(`${routeLabel(route)}沿线据点失守，贸易路线被切断！`, "warning");
       }
@@ -2810,8 +2981,8 @@
     }
     for (const port of ctx.getFacilitiesByType(TRADING_PORT.type)) {
       if (port.owner !== owner) continue;
-      const site = ctx.getSite(port.x, port.y);
-      const stale = !site || site.kind !== "shipyard" || ctx.areAllies(ctx.game.teams, site.owner, owner);
+      const site2 = ctx.getSite(port.x, port.y);
+      const stale = !site2 || site2.kind !== "shipyard" || ctx.areAllies(ctx.game.teams, site2.owner, owner);
       const occupied = !!ctx.getUnit(port.x, port.y) && !ctx.areAllies(ctx.game.teams, ctx.getUnit(port.x, port.y).owner, owner);
       if (stale || occupied) {
         ctx.removeFacility(port.id);
@@ -2856,14 +3027,14 @@
   function maybePortProduction(ctx, owner) {
     const shipyards = ownerShipyards(ctx, owner);
     if (shipyards.length < 2) return;
-    const site = shipyards.find((s) => !ctx.getUnit(s.x, s.y));
-    if (!site) return;
+    const site2 = shipyards.find((s) => !ctx.getUnit(s.x, s.y));
+    if (!site2) return;
     const cost = Math.round((ctx.typeMeta("galley").cost || 30) * 0.5);
     if ((ctx.game.goldByOwner[owner] || 0) < cost) return;
     if (!ctx.spendGold(owner, cost)) return;
-    const u = ctx.createUnit("galley", owner, site.x, site.y);
-    ctx.events.emit("productionCompleted", { owner, unit: u, site, kind: "unit" });
-    ctx.log(`海上垄断：${site.name || "港口"}（${site.x},${site.y}）以半价 ${cost} 金币加速生产了桨帆船。`, "gold");
+    const u = ctx.createUnit("galley", owner, site2.x, site2.y);
+    ctx.events.emit("productionCompleted", { owner, unit: u, site: site2, kind: "unit" });
+    ctx.log(`海上垄断：${site2.name || "港口"}（${site2.x},${site2.y}）以半价 ${cost} 金币加速生产了桨帆船。`, "gold");
     return u;
   }
   function requestRouteDecision(ctx, owner) {
@@ -2979,13 +3150,13 @@
     const count = ctx.getFacilitiesByType(TRADING_PORT.type).filter((f) => f.owner === owner).length;
     if (count >= TRADING_PORT.maxPorts) return [];
     const out = [];
-    for (const site of ctx.game.sites) {
-      if (site.kind !== "shipyard") continue;
-      if (site.owner === "neutral" || ctx.areAllies(ctx.game.teams, site.owner, owner)) continue;
-      if (ctx.getFacilitiesByType(TRADING_PORT.type).some((f) => f.x === site.x && f.y === site.y)) continue;
-      const caravan = ctx.game.units.find((u) => u.owner === owner && isCaravanType(u.type) && ctx.diagonalDist(u, site) <= TRADING_PORT.caravanRange);
+    for (const site2 of ctx.game.sites) {
+      if (site2.kind !== "shipyard") continue;
+      if (site2.owner === "neutral" || ctx.areAllies(ctx.game.teams, site2.owner, owner)) continue;
+      if (ctx.getFacilitiesByType(TRADING_PORT.type).some((f) => f.x === site2.x && f.y === site2.y)) continue;
+      const caravan = ctx.game.units.find((u) => u.owner === owner && isCaravanType(u.type) && ctx.diagonalDist(u, site2) <= TRADING_PORT.caravanRange);
       if (!caravan) continue;
-      out.push(site);
+      out.push(site2);
     }
     return out;
   }
@@ -2993,10 +3164,10 @@
     const ports = eligiblePorts(ctx, owner);
     if (!ports.length) return null;
     const options = [{ id: "none", label: "不转化", description: "保留现状，不设立中立商港。" }];
-    ports.slice(0, 3).forEach((site, idx) => {
+    ports.slice(0, 3).forEach((site2, idx) => {
       options.push({
         id: `port:${idx}`,
-        label: `转化${site.name || "港口"}（${site.x},${site.y}）`,
+        label: `转化${site2.name || "港口"}（${site2.x},${site2.y}）`,
         description: `中立商港：不完全占领，每回合 +${TRADING_PORT.income} 金币，并为拉古萨贸易网络提供连接。`
       });
     });
@@ -3011,21 +3182,21 @@
   function resolvePortChoice(ctx, owner, ports, choiceId) {
     if (!choiceId || choiceId === "none") return false;
     const idx = parseInt(String(choiceId).slice("port:".length), 10);
-    const site = ports[idx];
-    if (!site) return false;
+    const site2 = ports[idx];
+    if (!site2) return false;
     const count = ctx.getFacilitiesByType(TRADING_PORT.type).filter((f) => f.owner === owner).length;
     if (count >= TRADING_PORT.maxPorts) return false;
-    const caravan = ctx.game.units.find((u) => u.owner === owner && isCaravanType(u.type) && ctx.diagonalDist(u, site) <= TRADING_PORT.caravanRange);
+    const caravan = ctx.game.units.find((u) => u.owner === owner && isCaravanType(u.type) && ctx.diagonalDist(u, site2) <= TRADING_PORT.caravanRange);
     if (!caravan) {
       ctx.log("商队已离开，商港转化条件不再满足。", "warning");
       return false;
     }
-    const fac = ctx.createFacility(TRADING_PORT.type, owner, site.x, site.y, {
+    const fac = ctx.createFacility(TRADING_PORT.type, owner, site2.x, site2.y, {
       hp: TRADING_PORT.hp,
       duration: null,
-      data: { siteId: site.id, establishedTurn: ctx.game.turn }
+      data: { siteId: site2.id, establishedTurn: ctx.game.turn }
     });
-    ctx.log(`中立商港建立：${site.name || "港口"}（${site.x},${site.y}）成为拉古萨交易港，每回合 +${TRADING_PORT.income} 金币。`, "system");
+    ctx.log(`中立商港建立：${site2.name || "港口"}（${site2.x},${site2.y}）成为拉古萨交易港，每回合 +${TRADING_PORT.income} 金币。`, "system");
     return !!fac;
   }
   function onAfterAttack4(ctx, payload) {
@@ -3225,14 +3396,14 @@
   function isMamlukOwner(ctx, owner) {
     return !!owner && ctx.ownerFaction(owner) === "mamluk";
   }
-  function isSpecialUnit(ctx, unit) {
-    return !!unit && VETERANCY.specialUnits.includes(unit.type);
+  function isSpecialUnit(ctx, unit2) {
+    return !!unit2 && VETERANCY.specialUnits.includes(unit2.type);
   }
-  function ensureRecord(unit) {
-    let rec = state7.veterancy.get(unit.id);
+  function ensureRecord(unit2) {
+    let rec = state7.veterancy.get(unit2.id);
     if (!rec) {
       rec = {
-        unitId: unit.id,
+        unitId: unit2.id,
         xp: 0,
         veteranLevel: 0,
         kills: 0,
@@ -3242,7 +3413,7 @@
         elite: false,
         dead: false
       };
-      state7.veterancy.set(unit.id, rec);
+      state7.veterancy.set(unit2.id, rec);
     }
     return rec;
   }
@@ -3255,102 +3426,102 @@
     state7.morale.set(owner, v);
     return v;
   }
-  function nearNile(ctx, unit) {
+  function nearNile(ctx, unit2) {
     const g = ctx.game;
-    if (!g || !g.terrain || !unit) return false;
+    if (!g || !g.terrain || !unit2) return false;
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
-        const x = unit.x + dx;
-        const y = unit.y + dy;
+        const x = unit2.x + dx;
+        const y = unit2.y + dy;
         if (x < 0 || y < 0 || x >= g.w || y >= g.h) continue;
         if (g.terrain[y] && g.terrain[y][x] === "water") return true;
       }
     }
     for (const s of g.sites || []) {
       if (s.kind !== "city") continue;
-      if (Math.abs(s.x - unit.x) <= VETERANCY.egyptRange && Math.abs(s.y - unit.y) <= VETERANCY.egyptRange && ctx.areAllies(g.teams, s.owner, unit.owner)) {
+      if (Math.abs(s.x - unit2.x) <= VETERANCY.egyptRange && Math.abs(s.y - unit2.y) <= VETERANCY.egyptRange && ctx.areAllies(g.teams, s.owner, unit2.owner)) {
         return true;
       }
     }
     return false;
   }
-  function hasScholarNearby(ctx, unit) {
-    if (!unit) return false;
-    const range = ctx.ownerNation(unit.owner) === "baghdad" ? 3 : 2;
-    return ctx.game.units.some((u) => u.owner === unit.owner && u.type === "caliphScholar" && Math.abs(u.x - unit.x) <= range && Math.abs(u.y - unit.y) <= range);
+  function hasScholarNearby(ctx, unit2) {
+    if (!unit2) return false;
+    const range = ctx.ownerNation(unit2.owner) === "baghdad" ? 3 : 2;
+    return ctx.game.units.some((u) => u.owner === unit2.owner && u.type === "caliphScholar" && Math.abs(u.x - unit2.x) <= range && Math.abs(u.y - unit2.y) <= range);
   }
-  function checkLevel(ctx, unit, rec) {
+  function checkLevel(ctx, unit2, rec) {
     if (rec.veteranLevel < 1 && rec.xp >= VETERANCY.v1Threshold) {
       rec.veteranLevel = 1;
       rec.lastPromotionTurn = ctx.game.turn || 0;
-      ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Veteran 1（攻击 +1）。`, "system");
+      ctx.log(`${ctx.typeMeta(unit2.type).name}晋升为 Veteran 1（攻击 +1）。`, "system");
     }
     if (rec.veteranLevel < 2 && rec.xp >= VETERANCY.v2Threshold) {
       rec.veteranLevel = 2;
       rec.lastPromotionTurn = ctx.game.turn || 0;
-      ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Veteran 2（防御 +1）。`, "system");
+      ctx.log(`${ctx.typeMeta(unit2.type).name}晋升为 Veteran 2（防御 +1）。`, "system");
     }
     if (rec.veteranLevel === 2 && rec.xp >= VETERANCY.v3Threshold && !rec.promotion) {
-      if (unit.owner === "player") {
-        if (!state7.v3Requested.has(unit.id)) {
-          requestV3Decision(ctx, unit, rec);
+      if (unit2.owner === "player") {
+        if (!state7.v3Requested.has(unit2.id)) {
+          requestV3Decision(ctx, unit2, rec);
         }
       }
     }
     if (rec.veteranLevel >= 3 && !rec.elite && rec.xp >= VETERANCY.eliteThreshold) {
       rec.elite = true;
       rec.lastPromotionTurn = ctx.game.turn || 0;
-      ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Elite——马穆鲁克精英！`, "system");
+      ctx.log(`${ctx.typeMeta(unit2.type).name}晋升为 Elite——马穆鲁克精英！`, "system");
     }
   }
-  function addXp(ctx, unit, amount, reason) {
-    if (!isSpecialUnit(ctx, unit)) return;
+  function addXp(ctx, unit2, amount, reason) {
+    if (!isSpecialUnit(ctx, unit2)) return;
     syncGameRef7(ctx);
-    const rec = ensureRecord(unit);
+    const rec = ensureRecord(unit2);
     if (rec.dead) return;
     let xp = amount;
-    if (ctx.ownerNation(unit.owner) === "egypt" && nearNile(ctx, unit)) {
+    if (ctx.ownerNation(unit2.owner) === "egypt" && nearNile(ctx, unit2)) {
       xp = Math.round(xp * VETERANCY.egyptXpMult);
     }
-    if (getMorale(unit.owner) >= MORALE.high) {
+    if (getMorale(unit2.owner) >= MORALE.high) {
       xp = Math.round(xp * MORALE.highXpMult);
     }
     rec.xp += xp;
     if (reason === "kill") rec.kills += 1;
-    checkLevel(ctx, unit, rec);
+    checkLevel(ctx, unit2, rec);
   }
   var V3_OPTION_LABEL = { charge: "冲锋强化", bloodlust: "击杀回血", swift: "移动力强化" };
-  function requestV3Decision(ctx, unit, rec) {
-    state7.v3Requested.add(unit.id);
+  function requestV3Decision(ctx, unit2, rec) {
+    state7.v3Requested.add(unit2.id);
     const options = [
       { id: "charge", label: "冲锋强化", description: "满移动力发起攻击时伤害 +3。" },
       { id: "bloodlust", label: "击杀回血", description: "击杀单位后回复 2 点生命。" },
       { id: "swift", label: "移动力强化", description: "永久移动力 +1。" }
     ];
-    return ctx.requestDecision(`mlV3_${unit.id}`, {
-      owner: unit.owner,
-      unitId: unit.id,
+    return ctx.requestDecision(`mlV3_${unit2.id}`, {
+      owner: unit2.owner,
+      unitId: unit2.id,
       title: "精锐晋升",
-      description: `${ctx.typeMeta(unit.type).name}达到 Veteran 3，选择晋升方向。`,
+      description: `${ctx.typeMeta(unit2.type).name}达到 Veteran 3，选择晋升方向。`,
       options,
       onResolve: (choiceId) => {
-        applyV3Promotion(ctx, unit, choiceId);
+        applyV3Promotion(ctx, unit2, choiceId);
       }
     });
   }
-  function applyV3Promotion(ctx, unit, choiceId) {
-    const rec = state7.veterancy.get(unit.id);
+  function applyV3Promotion(ctx, unit2, choiceId) {
+    const rec = state7.veterancy.get(unit2.id);
     if (!rec || rec.dead) return false;
     if (!["charge", "bloodlust", "swift"].includes(choiceId)) return false;
     rec.promotion = choiceId;
     rec.veteranLevel = 3;
     rec.lastPromotionTurn = ctx.game.turn || 0;
     if (choiceId === "swift") {
-      unit.baseMove += VETERANCY.swiftMove;
-      unit.maxMove += VETERANCY.swiftMove;
-      unit.move += VETERANCY.swiftMove;
+      unit2.baseMove += VETERANCY.swiftMove;
+      unit2.maxMove += VETERANCY.swiftMove;
+      unit2.move += VETERANCY.swiftMove;
     }
-    ctx.log(`${ctx.typeMeta(unit.type).name}晋升为 Veteran 3（${V3_OPTION_LABEL[choiceId]}）。`, "system");
+    ctx.log(`${ctx.typeMeta(unit2.type).name}晋升为 Veteran 3（${V3_OPTION_LABEL[choiceId]}）。`, "system");
     return true;
   }
   var TACTIC_OPTIONS = [
@@ -3407,25 +3578,25 @@
       eliteLost(ctx, attacker);
     }
   }
-  function eliteLost(ctx, unit) {
-    const rec = state7.veterancy.get(unit.id);
+  function eliteLost(ctx, unit2) {
+    const rec = state7.veterancy.get(unit2.id);
     if (!rec || rec.dead || rec.veteranLevel < 3) return;
-    const paid = ctx.spendGold(unit.owner, ELITE_LOST.gold);
-    adjustMorale(unit.owner, -ELITE_LOST.moralePenalty);
+    const paid = ctx.spendGold(unit2.owner, ELITE_LOST.gold);
+    adjustMorale(unit2.owner, -ELITE_LOST.moralePenalty);
     rec.xp = 0;
     rec.veteranLevel = 0;
     rec.dead = true;
     ctx.log(
-      `${ctx.typeMeta(unit.type).name}（精锐）阵亡：损失${ELITE_LOST.gold}金币${paid ? "" : "（金币不足，实际未扣）"}，军团士气 -${ELITE_LOST.moralePenalty}，累计经验清零。`,
+      `${ctx.typeMeta(unit2.type).name}（精锐）阵亡：损失${ELITE_LOST.gold}金币${paid ? "" : "（金币不足，实际未扣）"}，军团士气 -${ELITE_LOST.moralePenalty}，累计经验清零。`,
       "warning"
     );
   }
   function onSiteCaptured2(ctx, payload) {
-    const { unit } = payload || {};
-    if (!unit) return;
+    const { unit: unit2 } = payload || {};
+    if (!unit2) return;
     syncGameRef7(ctx);
-    if (!isMamlukOwner(ctx, unit.owner)) return;
-    addXp(ctx, unit, VETERANCY.captureXp, "capture");
+    if (!isMamlukOwner(ctx, unit2.owner)) return;
+    addXp(ctx, unit2, VETERANCY.captureXp, "capture");
   }
   function onBeforeAttack4(ctx, payload) {
     const { attacker, defender, result, isCounter } = payload || {};
@@ -3482,16 +3653,16 @@
     }
   }
   function onBeforeMove5(ctx, payload) {
-    const { unit, to } = payload || {};
-    if (!unit || !to) return;
-    if (unit.move <= 0) return;
+    const { unit: unit2, to } = payload || {};
+    if (!unit2 || !to) return;
+    if (unit2.move <= 0) return;
     syncGameRef7(ctx);
-    if (ctx.ownerNation(unit.owner) !== "baghdad") return;
-    if (state7.tactic.get(unit.owner) !== "mobility") return;
-    if (state7.mobilityUsed.has(unit.id)) return;
-    if (!hasScholarNearby(ctx, unit)) return;
-    unit.move += VETERANCY.mobilityPrepay;
-    state7.mobilityUsed.add(unit.id);
+    if (ctx.ownerNation(unit2.owner) !== "baghdad") return;
+    if (state7.tactic.get(unit2.owner) !== "mobility") return;
+    if (state7.mobilityUsed.has(unit2.id)) return;
+    if (!hasScholarNearby(ctx, unit2)) return;
+    unit2.move += VETERANCY.mobilityPrepay;
+    state7.mobilityUsed.add(unit2.id);
   }
   function onTurnStart7(ctx, payload) {
     const owner = payload && payload.owner;
@@ -3646,10 +3817,10 @@
   function isMingOwner(ctx, owner) {
     return !!owner && ctx.ownerFaction(owner) === "ming";
   }
-  function isMingRemoteUnit(ctx, unit) {
-    if (!unit) return false;
-    if (!isMingOwner(ctx, unit.owner)) return false;
-    const meta = ctx.typeMeta(unit.type);
+  function isMingRemoteUnit(ctx, unit2) {
+    if (!unit2) return false;
+    if (!isMingOwner(ctx, unit2.owner)) return false;
+    const meta = ctx.typeMeta(unit2.type);
     return !!meta && meta.range > 1;
   }
   function inRange(a, b, range) {
@@ -3661,18 +3832,18 @@
   function watchtowerCovers(ctx, x, y) {
     return ctx.getFacilitiesByType("watchtower").some((f) => isMingOwner(ctx, f.owner) && inRange(f, { x, y }, FIREZONE.watchtowerRange));
   }
-  function entryDamageAt(ctx, unit, x, y) {
+  function entryDamageAt(ctx, unit2, x, y) {
     let best = 0;
     for (const fz of fireZonesAt(ctx, x, y)) {
-      if (ctx.areAllies(ctx.game.teams, unit.owner, fz.owner)) continue;
+      if (ctx.areAllies(ctx.game.teams, unit2.owner, fz.owner)) continue;
       let dmg = FIREZONE.damage;
       if (watchtowerCovers(ctx, fz.x, fz.y)) dmg += FIREZONE.watchtowerFzBonus;
       if (dmg > best) best = dmg;
     }
     return best;
   }
-  function crossfireBonusAt(ctx, unit, x, y) {
-    const hostile = fireZonesAt(ctx, x, y).filter((fz) => !ctx.areAllies(ctx.game.teams, unit.owner, fz.owner));
+  function crossfireBonusAt(ctx, unit2, x, y) {
+    const hostile = fireZonesAt(ctx, x, y).filter((fz) => !ctx.areAllies(ctx.game.teams, unit2.owner, fz.owner));
     if (hostile.length < FIREZONE.crossfireMin) return 0;
     let bonus = FIREZONE.crossfireBonus;
     if (watchtowerCovers(ctx, x, y)) bonus += FIREZONE.watchtowerXfBonus;
@@ -3701,14 +3872,14 @@
     ctx.log(`${ctx.typeMeta(attacker.type).name}在（${defender.x},${defender.y}）布下火力区，敌军进入将遭到火力打击。`, "battle");
   }
   function onBeforeMove6(ctx, payload) {
-    const { unit, to } = payload || {};
-    if (!unit || !to) return;
-    if (unit.move <= 0) return;
+    const { unit: unit2, to } = payload || {};
+    if (!unit2 || !to) return;
+    if (unit2.move <= 0) return;
     syncGameRef8(ctx);
-    const dmg = entryDamageAt(ctx, unit, to.x, to.y);
+    const dmg = entryDamageAt(ctx, unit2, to.x, to.y);
     if (dmg <= 0) return;
-    unit.hp = Math.max(1, unit.hp - dmg);
-    ctx.log(`${ctx.typeMeta(unit.type).name}闯入火力区，受到 ${dmg} 点火力打击（剩余 ${unit.hp} HP）。`, "battle");
+    unit2.hp = Math.max(1, unit2.hp - dmg);
+    ctx.log(`${ctx.typeMeta(unit2.type).name}闯入火力区，受到 ${dmg} 点火力打击（剩余 ${unit2.hp} HP）。`, "battle");
   }
   function onBeforeAttack5(ctx, payload) {
     const { defender, result } = payload || {};
@@ -3732,8 +3903,8 @@
     const debug = {
       config: () => ({ ...FIREZONE }),
       zones: () => ctx.getFacilitiesByType(FIREZONE.type).map((f) => ({ id: f.id, owner: f.owner, sourceUnitId: f.data.sourceUnitId, x: f.x, y: f.y, damage: f.data.damage, duration: f.duration })),
-      entryDamage: (unit, x, y) => entryDamageAt(ctx, unit, x, y),
-      crossfire: (unit, x, y) => crossfireBonusAt(ctx, unit, x, y)
+      entryDamage: (unit2, x, y) => entryDamageAt(ctx, unit2, x, y),
+      crossfire: (unit2, x, y) => crossfireBonusAt(ctx, unit2, x, y)
     };
     if (typeof globalThis !== "undefined") globalThis.__mingDebug = { ...globalThis.__mingDebug || {}, fireZone: debug };
     return debug;
@@ -3811,8 +3982,8 @@
   function isMingOwner2(ctx, owner) {
     return !!owner && ctx.ownerFaction(owner) === "ming";
   }
-  function isEngineerUnit(ctx, unit) {
-    return !!unit && isMingOwner2(ctx, unit.owner) && unit.type === "worksEngineer";
+  function isEngineerUnit(ctx, unit2) {
+    return !!unit2 && isMingOwner2(ctx, unit2.owner) && unit2.type === "worksEngineer";
   }
   function inRange2(a, b, range) {
     return Math.abs(a.x - b.x) <= range && Math.abs(a.y - b.y) <= range;
@@ -3823,21 +3994,21 @@
     const t = g.terrain[y] && g.terrain[y][x];
     return !!t && t !== "water" && t !== "mountain";
   }
-  function canBuildAt2(ctx, unit, type) {
+  function canBuildAt2(ctx, unit2, type) {
     const def = ENGINEERING[type];
     if (!def) return false;
-    if (!isEngineerUnit(ctx, unit)) return false;
-    if (!isLandCell3(ctx, unit.x, unit.y)) return false;
-    if (ctx.getSite(unit.x, unit.y)) return false;
-    const existing = ctx.getFacilityAt(unit.x, unit.y);
+    if (!isEngineerUnit(ctx, unit2)) return false;
+    if (!isLandCell3(ctx, unit2.x, unit2.y)) return false;
+    if (ctx.getSite(unit2.x, unit2.y)) return false;
+    const existing = ctx.getFacilityAt(unit2.x, unit2.y);
     if (existing && existing.type !== "fireZone") return false;
-    if ((ctx.game.goldByOwner[unit.owner] || 0) < def.cost) return false;
+    if ((ctx.game.goldByOwner[unit2.owner] || 0) < def.cost) return false;
     return true;
   }
-  function deployOptionsFor(ctx, unit) {
+  function deployOptionsFor(ctx, unit2) {
     const options = [{ id: "none", label: "不建", description: "保留金币与本回合行动，不部署设施。" }];
-    if (!isEngineerUnit(ctx, unit)) return options;
-    const gold = ctx.game.goldByOwner[unit.owner] || 0;
+    if (!isEngineerUnit(ctx, unit2)) return options;
+    const gold = ctx.game.goldByOwner[unit2.owner] || 0;
     for (const key of ["turret", "watchtower", "supplyDepot", "mingTrench", "bridge"]) {
       const d = ENGINEERING[key];
       if (gold >= d.cost) {
@@ -3846,25 +4017,25 @@
     }
     return options;
   }
-  function requestDeployDecision(ctx, unit) {
-    if (!unit || !isEngineerUnit(ctx, unit)) return null;
-    if (state9.deployedThisTurn.has(unit.id)) return null;
-    if (!isLandCell3(ctx, unit.x, unit.y)) return null;
-    if (ctx.getSite(unit.x, unit.y)) return null;
-    const existing = ctx.getFacilityAt(unit.x, unit.y);
+  function requestDeployDecision(ctx, unit2) {
+    if (!unit2 || !isEngineerUnit(ctx, unit2)) return null;
+    if (state9.deployedThisTurn.has(unit2.id)) return null;
+    if (!isLandCell3(ctx, unit2.x, unit2.y)) return null;
+    if (ctx.getSite(unit2.x, unit2.y)) return null;
+    const existing = ctx.getFacilityAt(unit2.x, unit2.y);
     if (existing && existing.type !== "fireZone") return null;
-    if ((ctx.game.goldByOwner[unit.owner] || 0) < ENGINEERING.turret.cost) return null;
-    const options = deployOptionsFor(ctx, unit);
+    if ((ctx.game.goldByOwner[unit2.owner] || 0) < ENGINEERING.turret.cost) return null;
+    const options = deployOptionsFor(ctx, unit2);
     if (options.length <= 1) return null;
-    state9.deployedThisTurn.add(unit.id);
-    const owner = unit.owner;
-    const unitId = unit.id;
+    state9.deployedThisTurn.add(unit2.id);
+    const owner = unit2.owner;
+    const unitId = unit2.id;
     const decisionId = `mgEng_${unitId}`;
     return ctx.requestDecision(decisionId, {
       owner,
       unitId,
       title: "工程部署",
-      description: `${ctx.typeMeta(unit.type).name}可在此格部署工程设施（消耗本回合行动并花费金币）。`,
+      description: `${ctx.typeMeta(unit2.type).name}可在此格部署工程设施（消耗本回合行动并花费金币）。`,
       options,
       onResolve: (choiceId) => {
         resolveDeploy(ctx, owner, unitId, choiceId);
@@ -3872,25 +4043,25 @@
     });
   }
   function resolveDeploy(ctx, owner, unitId, choiceId) {
-    const unit = ctx.game.units.find((u) => u.id === unitId);
-    if (!unit || unit.owner !== owner) return false;
+    const unit2 = ctx.game.units.find((u) => u.id === unitId);
+    if (!unit2 || unit2.owner !== owner) return false;
     if (!choiceId || choiceId === "none") return false;
     const def = ENGINEERING[choiceId];
     if (!def) return false;
-    if (!canBuildAt2(ctx, unit, choiceId)) {
-      ctx.log(`${ctx.typeMeta(unit.type).name}无法在此格部署${def.label}（条件不再满足）。`, "warning");
+    if (!canBuildAt2(ctx, unit2, choiceId)) {
+      ctx.log(`${ctx.typeMeta(unit2.type).name}无法在此格部署${def.label}（条件不再满足）。`, "warning");
       return false;
     }
     if (!ctx.spendGold(owner, def.cost)) return false;
-    ctx.createFacility(choiceId, owner, unit.x, unit.y, {
+    ctx.createFacility(choiceId, owner, unit2.x, unit2.y, {
       hp: def.hp,
       duration: def.duration,
       data: { ...typeof def.moveCostMod === "number" ? { moveCostMod: def.moveCostMod } : {} }
     });
-    unit.acted = true;
-    unit.move = 0;
-    unit.hasAttacked = true;
-    ctx.log(`${ctx.typeMeta(unit.type).name}在（${unit.x},${unit.y}）部署了${def.label}。`, "system");
+    unit2.acted = true;
+    unit2.move = 0;
+    unit2.hasAttacked = true;
+    ctx.log(`${ctx.typeMeta(unit2.type).name}在（${unit2.x},${unit2.y}）部署了${def.label}。`, "system");
     return true;
   }
   var FACILITY_CHIP_RATIO2 = 0.5;
@@ -3944,9 +4115,9 @@
       }
     }
     if (owner === "player") {
-      for (const unit of ctx.game.units) {
-        if (unit.owner !== owner) continue;
-        requestDeployDecision(ctx, unit);
+      for (const unit2 of ctx.game.units) {
+        if (unit2.owner !== owner) continue;
+        requestDeployDecision(ctx, unit2);
       }
     }
   }
@@ -4034,8 +4205,8 @@
     if (!defender) return false;
     const g = ctx.game;
     if (!g || !g.terrain) return false;
-    const site = ctx.getSite(defender.x, defender.y);
-    if (site && site.kind === "shipyard" && ctx.areAllies(g.teams, site.owner, defender.owner)) return true;
+    const site2 = ctx.getSite(defender.x, defender.y);
+    if (site2 && site2.kind === "shipyard" && ctx.areAllies(g.teams, site2.owner, defender.owner)) return true;
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         if (dx === 0 && dy === 0) continue;
@@ -4179,7 +4350,7 @@
         // 完全一致），push 后计入 produced 统计。金币/上限/位置校验与日志由调用方负责。
         createUnit: (type, owner, x, y) => {
           if (!typeMeta(type)) return null;
-          const created = unit(type, owner, x, y);
+          const created = unit2(type, owner, x, y);
           game.units.push(created);
           incrementStat("produced", owner, 1);
           return created;
@@ -4613,59 +4784,21 @@
       }
       return { w: width, h: height };
     }
-    function unit(type, owner, x, y) {
-      const meta = typeMeta(type);
-      return {
-        id: randomId(),
-        type,
-        owner,
-        x,
-        y,
-        hp: meta.hp,
-        maxHp: meta.hp,
-        move: meta.move,
-        maxMove: meta.move,
-        baseMove: meta.move,
-        acted: false,
-        hasAttacked: false,
-        lastAttacked: false,
-        kills: 0,
-        rank: 0,
-        cargo: meta.transport ? [] : null
-      };
+    const factoryDeps = { randomId, ownerName, log, getUnit: getUnit2, atUnitCap, buildBudgetLeft: buildBudgetLeft2, recordBuild: recordBuild2, incrementStat, recordStatSnapshot, ownerFaction, ownerNation: ownerNation2 };
+    function unit2(type, owner, x, y) {
+      return unit(game, factoryDeps, type, owner, x, y);
     }
-    function createCargoPayload(owner, type) {
-      return {
-        type,
-        owner,
-        hp: typeMeta(type).hp,
-        maxHp: typeMeta(type).hp,
-        lastAttacked: false
-      };
+    function createCargoPayload2(owner, type) {
+      return createCargoPayload(game, factoryDeps, owner, type);
     }
-    function createLoadedTransport(owner, x, y, cargoTypes = [], transportType = "transport") {
-      const transport = unit(transportType, owner, x, y);
-      transport.cargo = normalizeCargoTypes(cargoTypes, transportType).map((type) => createCargoPayload(owner, type));
-      return transport;
+    function createLoadedTransport2(owner, x, y, cargoTypes = [], transportType = "transport") {
+      return createLoadedTransport(game, factoryDeps, owner, x, y, cargoTypes, transportType);
     }
-    function site(kind, owner, x, y, name, tier = 1, income = null) {
-      return {
-        id: randomId(),
-        kind,
-        owner,
-        x,
-        y,
-        name,
-        tier,
-        income: income == null ? siteMeta(kind).income : income
-      };
+    function site2(kind, owner, x, y, name, tier = 1, income = null) {
+      return site(game, factoryDeps, kind, owner, x, y, name, tier, income);
     }
-    function createCamp(owner, x, y) {
-      const camp = site("camp", owner, x, y, "临时营地", 2, 0);
-      const campNat = owner === "player" ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
-      camp.duration = CAMP_DURATION + (campNat === "goldenHordeCore" ? 2 : 0);
-      camp.uncapturable = true;
-      return camp;
+    function createCamp2(owner, x, y) {
+      return createCamp(game, factoryDeps, owner, x, y);
     }
     function getUnit2(x, y) {
       return game.units.find((entry) => entry.x === x && entry.y === y);
@@ -4734,20 +4867,17 @@
     function campCount2(owner) {
       return game.sites.filter((entry) => entry.kind === "camp" && entry.owner === owner).length;
     }
-    function unitBuildCost(unitEntry) {
-      if (isTransportUnit(unitEntry)) {
-        return transportCost((unitEntry.cargo || []).map((payload) => payload.type), unitEntry.type);
-      }
-      return typeMeta(unitEntry.type).cost;
+    function unitBuildCost2(unitEntry) {
+      return unitBuildCost(game, factoryDeps, unitEntry);
     }
-    function sellRefund(unitEntry) {
-      return Math.floor(unitBuildCost(unitEntry) / 2);
+    function sellRefund2(unitEntry) {
+      return sellRefund(game, factoryDeps, unitEntry);
     }
     function sellUnit(owner, unitEntry) {
       if (!unitEntry || unitEntry.owner !== owner || game.side !== owner || game.over) {
         return false;
       }
-      const refund = sellRefund(unitEntry);
+      const refund = sellRefund2(unitEntry);
       game.goldByOwner[owner] += refund;
       game.units = game.units.filter((entry) => entry !== unitEntry);
       incrementStrat(owner, "sells");
@@ -4770,71 +4900,44 @@
       const seaRatio = ownedUnitCount(owner, "sea") / Math.max(1, unitCapFor("sea"));
       return Math.max(landRatio, seaRatio);
     }
-    function cargoOptionTypes() {
-      return Object.keys(TYPES).filter((type) => typeMeta(type).domain === "land");
+    function cargoOptionTypes2() {
+      return cargoOptionTypes(game, factoryDeps);
     }
-    function normalizeCargoTypes(types, transportType = "transport") {
-      return (types || []).filter((type) => type && type !== "none" && TYPES[type] && typeMeta(type).domain === "land").slice(0, typeMeta(transportType).transport);
+    function normalizeCargoTypes2(types, transportType = "transport") {
+      return normalizeCargoTypes(game, factoryDeps, types, transportType);
     }
     function sameCell(a, b) {
       return !!a && !!b && a.x === b.x && a.y === b.y;
     }
-    function rankFromKills(kills) {
-      let rank = 0;
-      for (let index = 0; index < UNIT_RANK_THRESHOLDS.length; index++) {
-        if (kills >= UNIT_RANK_THRESHOLDS[index]) {
-          rank = index;
-        }
-      }
-      return rank;
+    function rankFromKills2(kills) {
+      return rankFromKills(game, factoryDeps, kills);
     }
-    function effectiveMove(unitEntry) {
-      return unitEntry.baseMove + Math.floor(unitEntry.rank / 2);
+    function effectiveMove2(unitEntry) {
+      return effectiveMove(game, factoryDeps, unitEntry);
     }
-    function healMultiplier(unitEntry) {
-      return 1 + unitEntry.rank * 0.15;
+    function healMultiplier2(unitEntry) {
+      return healMultiplier(game, factoryDeps, unitEntry);
     }
-    function grantKills(unitEntry, kills) {
-      if (!unitEntry) {
-        return;
-      }
-      const killFac = unitEntry.owner === "player" ? game.settings?.faction : game.aiProfiles?.[unitEntry.owner]?.faction;
-      const effectiveKills = killFac === "mamluk" ? kills * 2 : kills;
-      unitEntry.kills += effectiveKills;
-      const nextRank = rankFromKills(unitEntry.kills);
-      if (nextRank !== unitEntry.rank) {
-        unitEntry.rank = nextRank;
-        unitEntry.maxMove = effectiveMove(unitEntry);
-        unitEntry.move = Math.max(unitEntry.move, Math.min(unitEntry.maxMove, unitEntry.move + 1));
-        log(`${ownerName(unitEntry.owner)}的${typeMeta(unitEntry.type).name}晋升为 ${nextRank} 级老兵。`, "system");
-      }
+    function grantKills2(unitEntry, kills) {
+      return grantKills(game, factoryDeps, unitEntry, kills);
     }
-    function transportCost(cargoTypes = [], transportType = "transport") {
-      return typeMeta(transportType).cost + normalizeCargoTypes(cargoTypes, transportType).reduce((sum, type) => sum + typeMeta(type).cost, 0);
+    function transportCost2(cargoTypes = [], transportType = "transport") {
+      return transportCost(game, factoryDeps, cargoTypes, transportType);
     }
-    function factionAdjustedCost(owner, type, cargoTypes = []) {
-      const base = isTransportType(type) ? transportCost(cargoTypes, type) : typeMeta(type).cost;
-      const fac = owner === "player" ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
-      const nat = owner === "player" ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
-      const typeFac = typeMeta(type).faction;
-      let markup = fac === "venice" && typeFac && typeFac !== "venice" ? 1.5 : 1;
-      if (nat === "ragusa") markup *= 0.95;
-      if (nat === "veniceCore" && typeMeta(type).domain === "sea") markup *= 0.8;
-      if (nat === "mingCore" && (typeMeta(type).domain === "sea" || type === "engineer" || type === "worksEngineer")) markup *= 0.9;
-      return Math.round(base * markup);
+    function factionAdjustedCost2(owner, type, cargoTypes = []) {
+      return factionAdjustedCost(game, factoryDeps, owner, type, cargoTypes);
     }
-    function cargoLabel(type) {
-      return type === "none" ? "空位" : `${typeMeta(type).icon} ${typeMeta(type).name}`;
+    function cargoLabel2(type) {
+      return cargoLabel(game, factoryDeps, type);
     }
-    function describeCargo(cargoTypes = []) {
-      const types = normalizeCargoTypes(cargoTypes);
-      return types.length ? types.map((type) => typeMeta(type).name).join("、") : "空舱";
+    function describeCargo2(cargoTypes = []) {
+      return describeCargo(game, factoryDeps, cargoTypes);
     }
     function transportConfigMarkup(presetKey, title) {
       const capacity = typeMeta("transport").transport;
       const rows = [];
       for (let slot = 0; slot < capacity; slot++) {
-        const options = ["none", ...cargoOptionTypes()].map((type) => `<option value="${type}" ${uiState[presetKey][slot] === type ? "selected" : ""}>${cargoLabel(type)}</option>`).join("");
+        const options = ["none", ...cargoOptionTypes2()].map((type) => `<option value="${type}" ${uiState[presetKey][slot] === type ? "selected" : ""}>${cargoLabel2(type)}</option>`).join("");
         rows.push(`<label class="cargo-row"><span>槽位${slot + 1}</span><select data-cargo-preset="${presetKey}" data-cargo-slot="${slot}">${options}</select></label>`);
       }
       return [
@@ -4843,7 +4946,7 @@
         '<div class="cargo-grid">',
         rows.join(""),
         "</div>",
-        `<div class="config-note">当前配置：${describeCargo(uiState[presetKey])} · 总价 ${transportCost(uiState[presetKey])} 🪙</div>`,
+        `<div class="config-note">当前配置：${describeCargo2(uiState[presetKey])} · 总价 ${transportCost2(uiState[presetKey])} 🪙</div>`,
         "</div>"
       ].join("");
     }
@@ -4912,7 +5015,7 @@
           log(`${typeMeta(attacker.type).name}的火器齐射溅射到${typeMeta(nearby.type).name}，造成 ${splashDamage} 点伤害。`, "battle");
           if (nearby.hp <= 0) {
             incrementStat("kills", attacker.owner, 1);
-            grantKills(attacker, 1);
+            grantKills2(attacker, 1);
             removeUnit(nearby);
           }
         }
@@ -4920,7 +5023,7 @@
       log(`${ownerName(attacker.owner)}的${typeMeta(attacker.type).name}攻击${ownerName(defender.owner)}的${typeMeta(defender.type).name}，造成 ${result.damage} 点伤害。`, "battle");
       if (defender.hp <= 0) {
         incrementStat("kills", attacker.owner, 1 + (defender.cargo?.length || 0));
-        grantKills(attacker, 1 + (defender.cargo?.length || 0));
+        grantKills2(attacker, 1 + (defender.cargo?.length || 0));
         if (attacker.type === "sultanGuard") {
           attacker.hp = Math.min(attacker.maxHp, attacker.hp + 3);
         }
@@ -4936,7 +5039,7 @@
         }
         if (attacker.hp <= 0) {
           incrementStat("kills", defender.owner, 1 + (attacker.cargo?.length || 0));
-          grantKills(defender, 1 + (attacker.cargo?.length || 0));
+          grantKills2(defender, 1 + (attacker.cargo?.length || 0));
           removeUnit(attacker);
           log(`${typeMeta(attacker.type).name}在反击中被击毁。`, "battle");
         }
@@ -5074,7 +5177,7 @@
         return false;
       }
       const payload = transport.cargo.shift();
-      const unitEntry = unit(payload.type, payload.owner, x, y);
+      const unitEntry = unit2(payload.type, payload.owner, x, y);
       unitEntry.hp = payload.hp;
       unitEntry.maxHp = payload.maxHp;
       unitEntry.move = 0;
@@ -5114,7 +5217,7 @@
       cells.sort((a, b) => strategicLandingScore(transport.owner, b) - strategicLandingScore(transport.owner, a));
       return unloadTransport(transport, cells[0].x, cells[0].y);
     }
-    const economyDeps = { areAllies: areAllies2, tierName, ownerName, log, getUnit: getUnit2, healMultiplier };
+    const economyDeps = { areAllies: areAllies2, tierName, ownerName, log, getUnit: getUnit2, healMultiplier: healMultiplier2 };
     function supportSites2(unitEntry) {
       return supportSites(game, economyDeps, unitEntry);
     }
@@ -5166,21 +5269,21 @@
         if (ownerFac === "hre") {
           for (const siteEntry of game.sites.filter((s) => s.kind === "city" && s.owner === owner)) {
             if (!getUnit2(siteEntry.x, siteEntry.y)) {
-              game.units.push(unit("militia", owner, siteEntry.x, siteEntry.y));
+              game.units.push(unit2("militia", owner, siteEntry.x, siteEntry.y));
             }
           }
         }
         if (ownerFac === "ming" && game.turn % 3 === 0) {
           for (const siteEntry of game.sites.filter((s) => (s.kind === "city" || s.kind === "barracks") && s.owner === owner)) {
             if (!getUnit2(siteEntry.x, siteEntry.y)) {
-              game.units.push(unit("militia", owner, siteEntry.x, siteEntry.y));
+              game.units.push(unit2("militia", owner, siteEntry.x, siteEntry.y));
             }
           }
         }
       }
       eventBus.emit("turnStart", { owner, initial });
       for (const unitEntry of game.units.filter((entry) => entry.owner === owner)) {
-        unitEntry.maxMove = effectiveMove(unitEntry);
+        unitEntry.maxMove = effectiveMove2(unitEntry);
         unitEntry.move = unitEntry.maxMove;
         unitEntry.acted = false;
         unitEntry.hasAttacked = false;
@@ -5274,21 +5377,8 @@
       if (owner === "player") return game.settings?.nation;
       return game.aiProfiles?.[owner]?.nation;
     }
-    function buildableTypes(siteEntry) {
-      const domain = siteMeta(siteEntry.kind).domain;
-      if (!domain) {
-        return [];
-      }
-      const faction = ownerFaction(siteEntry.owner);
-      const nation = ownerNation2(siteEntry.owner);
-      const isVenice = faction === "venice";
-      return Object.keys(TYPES).filter((type) => {
-        const meta = typeMeta(type);
-        if (meta.domain !== domain || meta.level > siteEntry.tier) return false;
-        if (!isVenice && meta.faction && meta.faction !== faction) return false;
-        if (!isVenice && meta.nation && meta.nation !== nation) return false;
-        return true;
-      });
+    function buildableTypes2(siteEntry) {
+      return buildableTypes(game, factoryDeps, siteEntry);
     }
     function siteUpgradeCost2(siteEntry) {
       return siteUpgradeCost(game, economyDeps, siteEntry);
@@ -5299,33 +5389,8 @@
     function recordBuild2(owner, count) {
       return recordBuild(game, economyDeps, owner, count);
     }
-    function buildAtSite(owner, siteEntry, type, options = {}) {
-      const cargoTypes = isTransportType(type) ? normalizeCargoTypes(options.cargoTypes) : [];
-      const totalCost = factionAdjustedCost(owner, type, cargoTypes);
-      const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
-      if (!siteEntry || siteEntry.owner !== owner || !buildableTypes(siteEntry).includes(type) || getUnit2(siteEntry.x, siteEntry.y) || game.goldByOwner[owner] < totalCost) {
-        return false;
-      }
-      if (atUnitCap(owner, typeMeta(type).domain) || buildBudgetLeft2(owner) < builtUnits) {
-        return false;
-      }
-      recordBuild2(owner, builtUnits);
-      game.goldByOwner[owner] -= totalCost;
-      let created = null;
-      if (isTransportType(type)) {
-        created = createLoadedTransport(owner, siteEntry.x, siteEntry.y, cargoTypes, type);
-        game.units.push(created);
-        log(`${ownerName(owner)}在${siteEntry.name}下水了${typeMeta(type).name}，预载 ${describeCargo(cargoTypes)}。`, "system");
-        incrementStat("produced", owner, 1 + cargoTypes.length);
-      } else {
-        created = unit(type, owner, siteEntry.x, siteEntry.y);
-        game.units.push(created);
-        log(`${ownerName(owner)}在${siteEntry.name}部署了${typeMeta(type).name}。`, "system");
-        incrementStat("produced", owner, 1);
-      }
-      recordStatSnapshot("build");
-      eventBus.emit("productionCompleted", { owner, unit: created, site: siteEntry, kind: isTransportType(type) ? "ship" : "unit" });
-      return true;
+    function buildAtSite2(owner, siteEntry, type, options = {}) {
+      return buildAtSite(game, factoryDeps, owner, siteEntry, type, options);
     }
     function upgradeSite2(owner, siteEntry) {
       return upgradeSite(game, economyDeps, owner, siteEntry);
@@ -5348,7 +5413,7 @@
       return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && isLandTile(unitEntry.x, unitEntry.y) && !getSite2(unitEntry.x, unitEntry.y) && game.goldByOwner[unitEntry.owner] >= CAMP_COST && campCount2(unitEntry.owner) < MAX_CAMPS_PER_SIDE;
     }
     function canEngineerLaunch(unitEntry, type, cell, cargoTypes = []) {
-      const totalCost = factionAdjustedCost(unitEntry.owner, type, cargoTypes);
+      const totalCost = factionAdjustedCost2(unitEntry.owner, type, cargoTypes);
       return !!unitEntry && unitEntry.type === "engineer" && unitEntry.owner === game.side && !unitEntry.acted && !!cell && diagonalDist(unitEntry, cell) === 1 && isWaterTile(cell.x, cell.y) && !getUnit2(cell.x, cell.y) && game.goldByOwner[unitEntry.owner] >= totalCost;
     }
     function buildCamp(unitEntry) {
@@ -5356,7 +5421,7 @@
         return false;
       }
       game.goldByOwner[unitEntry.owner] -= CAMP_COST;
-      game.sites.push(createCamp(unitEntry.owner, unitEntry.x, unitEntry.y));
+      game.sites.push(createCamp2(unitEntry.owner, unitEntry.x, unitEntry.y));
       consumeAction(unitEntry);
       clearPendingOrder();
       incrementStat("captures", unitEntry.owner, 1);
@@ -5366,7 +5431,7 @@
       return true;
     }
     function engineerLaunch(unitEntry, type, cell, cargoTypes = []) {
-      const totalCost = factionAdjustedCost(unitEntry.owner, type, cargoTypes);
+      const totalCost = factionAdjustedCost2(unitEntry.owner, type, cargoTypes);
       const builtUnits = isTransportType(type) ? 1 + cargoTypes.length : 1;
       if (!canEngineerLaunch(unitEntry, type, cell, cargoTypes)) {
         return false;
@@ -5376,7 +5441,7 @@
       }
       recordBuild2(unitEntry.owner, builtUnits);
       game.goldByOwner[unitEntry.owner] -= totalCost;
-      game.units.push(isTransportType(type) ? createLoadedTransport(unitEntry.owner, cell.x, cell.y, cargoTypes, type) : unit(type, unitEntry.owner, cell.x, cell.y));
+      game.units.push(isTransportType(type) ? createLoadedTransport2(unitEntry.owner, cell.x, cell.y, cargoTypes, type) : unit2(type, unitEntry.owner, cell.x, cell.y));
       consumeAction(unitEntry);
       clearPendingOrder();
       incrementStat("produced", unitEntry.owner, isTransportType(type) ? 1 + cargoTypes.length : 1);
@@ -5384,7 +5449,7 @@
         incrementStrat(unitEntry.owner, "transportLaunches");
       }
       recordStatSnapshot("engineer-build");
-      log(`${ownerName(unitEntry.owner)}的工程师在海边建造了${isTransportType(type) ? `${typeMeta(type).name}（${describeCargo(cargoTypes)}）` : typeMeta(type).name}。`, "system");
+      log(`${ownerName(unitEntry.owner)}的工程师在海边建造了${isTransportType(type) ? `${typeMeta(type).name}（${describeCargo2(cargoTypes)}）` : typeMeta(type).name}。`, "system");
       return true;
     }
     function drawSelection(x, y, color) {
@@ -5598,7 +5663,7 @@
           actions.push(`<button class="btn" data-unit-action="unload" ${unitEntry.cargo.length ? "" : "disabled"}>自动卸载到临近空地</button>`);
         }
         if (unitEntry.owner === "player" && game.side === "player") {
-          actions.push(`<button class="btn" data-unit-action="sell">变卖回收 ${sellRefund(unitEntry)} 🪙</button>`);
+          actions.push(`<button class="btn" data-unit-action="sell">变卖回收 ${sellRefund2(unitEntry)} 🪙</button>`);
         }
         const cellStack = unitsAt(unitEntry.x, unitEntry.y);
         if (cellStack.length > 1) {
@@ -5610,7 +5675,7 @@
         $("selActions").innerHTML = actions.join("");
         let selectionHint = meta.text;
         if (game.pendingOrder?.kind === "engineer-launch" && unitEntry.id === game.pendingOrder.builderId) {
-          const productText = isTransportType(game.pendingOrder.product) ? `${typeMeta(game.pendingOrder.product).name}（${describeCargo(game.pendingOrder.cargoTypes)}）` : typeMeta(game.pendingOrder.product).name;
+          const productText = isTransportType(game.pendingOrder.product) ? `${typeMeta(game.pendingOrder.product).name}（${describeCargo2(game.pendingOrder.cargoTypes)}）` : typeMeta(game.pendingOrder.product).name;
           selectionHint = `已选择建造${productText}，请点击相邻海格下水。`;
         } else if (siteEntry) {
           const attackText = attackBuff ? `攻击 +${attackBuff}` : "";
@@ -5627,7 +5692,7 @@
       if (engineer && game.side === "player") {
         const coastCells = engineerBuildCells(engineer);
         const warshipDisabled = coastCells.length && game.goldByOwner.player >= typeMeta("warship").cost && !engineer.acted ? "" : "disabled";
-        const transportDisabled = coastCells.length && game.goldByOwner.player >= transportCost(uiState.engineerCargo) && !engineer.acted ? "" : "disabled";
+        const transportDisabled = coastCells.length && game.goldByOwner.player >= transportCost2(uiState.engineerCargo) && !engineer.acted ? "" : "disabled";
         const campDisabled = canBuildCamp(engineer) ? "" : "disabled";
         const engineerPendingText = game.pendingOrder?.kind === "engineer-launch" && game.pendingOrder.builderId === engineer.id ? "待下水：点击高亮海格完成建造。" : coastCells.length ? "海边施工可用。" : "先移动到靠海陆格，才能下水建造舰船。";
         $("engineerBody").innerHTML = [
@@ -5639,8 +5704,8 @@
           `<button class="btn" data-engineer-build="galley" ${warshipDisabled}>在相邻海格建造桨帆船（${typeMeta("galley").cost} 🪙）</button>`,
           `<button class="btn" data-engineer-build="warship" ${warshipDisabled}>在相邻海格建造战船（${typeMeta("warship").cost} 🪙）</button>`,
           `<button class="btn" data-engineer-build="battleship" ${warshipDisabled}>在相邻海格建造战舰（${typeMeta("battleship").cost} 🪙）</button>`,
-          `<button class="btn" data-engineer-build="barge" ${transportDisabled}>在相邻海格建造驳船（${transportCost(uiState.engineerCargo, "barge")} 🪙）</button>`,
-          `<button class="btn" data-engineer-build="transport" ${transportDisabled}>在相邻海格建造运兵船（${transportCost(uiState.engineerCargo, "transport")} 🪙）</button>`,
+          `<button class="btn" data-engineer-build="barge" ${transportDisabled}>在相邻海格建造驳船（${transportCost2(uiState.engineerCargo, "barge")} 🪙）</button>`,
+          `<button class="btn" data-engineer-build="transport" ${transportDisabled}>在相邻海格建造运兵船（${transportCost2(uiState.engineerCargo, "transport")} 🪙）</button>`,
           `<button class="btn" data-engineer-build="camp" ${campDisabled}>建立临时营地（${CAMP_COST} 🪙）</button>`,
           "</div>",
           `<div class="engineer-pending">${engineerPendingText}</div>`,
@@ -5667,11 +5732,11 @@
         $("btnFullHeal").disabled = !manageable || !occupant || game.goldByOwner.player < cost;
         $("shipyardConfig").classList.toggle("hidden", siteEntry.kind !== "shipyard");
         $("shipyardConfig").innerHTML = siteEntry.kind === "shipyard" ? transportConfigMarkup("shipyardCargo", "运兵船预载") : "";
-        const types = buildableTypes(siteEntry);
+        const types = buildableTypes2(siteEntry);
         $("buildGrid").innerHTML = types.length ? types.map((type) => {
-          const costText = isTransportType(type) ? transportCost(uiState.shipyardCargo, button.dataset.type) : typeMeta(type).cost;
+          const costText = isTransportType(type) ? transportCost2(uiState.shipyardCargo, button.dataset.type) : typeMeta(type).cost;
           const disabled = !manageable || game.goldByOwner.player < costText || getUnit2(siteEntry.x, siteEntry.y);
-          const suffix = isTransportType(type) ? `<small> 预载：${describeCargo(uiState.shipyardCargo)}</small>` : `<small> ${domainName(typeMeta(type).domain)} ${tierName(typeMeta(type).level)}</small>`;
+          const suffix = isTransportType(type) ? `<small> 预载：${describeCargo2(uiState.shipyardCargo)}</small>` : `<small> ${domainName(typeMeta(type).domain)} ${tierName(typeMeta(type).level)}</small>`;
           return `<button class="btn build" data-type="${type}" ${disabled ? "disabled" : ""}><span>${typeMeta(type).icon} ${typeMeta(type).name}${suffix}</span><span class="cost">${costText} 🪙</span></button>`;
         }).join("") : '<div class="muted">该据点不能生产单位。</div>';
       } else {
@@ -5924,7 +5989,7 @@
       ];
       return entries.map((entry, index) => {
         const tier = Math.random() < 0.62 ? 1 : Math.random() < 0.84 ? 2 : 3;
-        return site("city", entry.owner, entry.cell.x, entry.cell.y, CITY_NAMES[index % CITY_NAMES.length], tier, CITY_INCOME_BY_TIER[tier]);
+        return site2("city", entry.owner, entry.cell.x, entry.cell.y, CITY_NAMES[index % CITY_NAMES.length], tier, CITY_INCOME_BY_TIER[tier]);
       });
     }
     function makeSpecialSites() {
@@ -5939,14 +6004,14 @@
       oilCells.forEach((cell, index) => {
         const kind = oilKinds[index % oilKinds.length];
         used.add(cellKey(cell.x, cell.y));
-        specials.push(site(kind, "neutral", cell.x, cell.y, OIL_NAMES[index % OIL_NAMES.length], 1, siteMeta(kind).income));
+        specials.push(site2(kind, "neutral", cell.x, cell.y, OIL_NAMES[index % OIL_NAMES.length], 1, siteMeta(kind).income));
       });
       const barracksPool = land.filter((cell) => !used.has(cellKey(cell.x, cell.y)));
       const barracksCount = clamp(Math.round(land.length / 150 * density), 2, 8);
       distributeCells(barracksPool, barracksCount, spread).forEach((cell, index) => {
         const kind = index % 2 === 0 ? "barracksLarge" : "barracksSmall";
         used.add(cellKey(cell.x, cell.y));
-        specials.push(site(kind, "neutral", cell.x, cell.y, BARRACK_NAMES[index % BARRACK_NAMES.length], 1, 0));
+        specials.push(site2(kind, "neutral", cell.x, cell.y, BARRACK_NAMES[index % BARRACK_NAMES.length], 1, 0));
       });
       return specials;
     }
@@ -5974,7 +6039,7 @@
           continue;
         }
         used.add(cellKey(cell.x, cell.y));
-        sites.push(site("shipyard", owner, cell.x, cell.y, PORT_NAMES[sites.length % PORT_NAMES.length], Math.random() < 0.25 ? 2 : 1, 8 + rnd(3)));
+        sites.push(site2("shipyard", owner, cell.x, cell.y, PORT_NAMES[sites.length % PORT_NAMES.length], Math.random() < 0.25 ? 2 : 1, 8 + rnd(3)));
       }
       const coastal = [];
       for (let y = 0; y < H; y++) {
@@ -5988,7 +6053,7 @@
       const density = game.settings?.siteDensity ?? 1;
       for (const cell of distributeCells(coastal, clamp(Math.round(coastal.length / 60 * density), 1, 8), spread)) {
         used.add(cellKey(cell.x, cell.y));
-        sites.push(site("shipyard", "neutral", cell.x, cell.y, PORT_NAMES[sites.length % PORT_NAMES.length], 1, 7 + rnd(3)));
+        sites.push(site2("shipyard", "neutral", cell.x, cell.y, PORT_NAMES[sites.length % PORT_NAMES.length], 1, 7 + rnd(3)));
       }
       const deep = [];
       for (let y = 0; y < H; y++) {
@@ -5999,7 +6064,7 @@
         }
       }
       for (const cell of distributeCells(deep, clamp(Math.round(deep.length / 90 * density), 0, 6), spread)) {
-        sites.push(site("fortress", "neutral", cell.x, cell.y, FORT_NAMES[sites.length % FORT_NAMES.length], 1, 5 + rnd(2)));
+        sites.push(site2("fortress", "neutral", cell.x, cell.y, FORT_NAMES[sites.length % FORT_NAMES.length], 1, 5 + rnd(2)));
       }
       return sites;
     }
@@ -6023,7 +6088,7 @@
         cells.sort((a, b) => Math.hypot(a.x - centerX, a.y - centerY) - Math.hypot(b.x - centerX, b.y - centerY));
         const pick = deploy === "random" ? cells[rnd(cells.length)] : cells[rnd(Math.max(1, Math.min(cells.length, Math.ceil(cells.length * 0.5))))];
         used.add(cellKey(pick.x, pick.y));
-        game.units.push(unit(bag[rnd(bag.length)], owner, pick.x, pick.y));
+        game.units.push(unit2(bag[rnd(bag.length)], owner, pick.x, pick.y));
       }
     }
     function spawnSea(owner, count) {
@@ -6033,7 +6098,7 @@
         if (spawned >= count || getUnit2(port.x, port.y)) {
           continue;
         }
-        game.units.push(unit(spawned === 0 ? "warship" : "transport", owner, port.x, port.y));
+        game.units.push(unit2(spawned === 0 ? "warship" : "transport", owner, port.x, port.y));
         spawned += 1;
       }
       return spawned;
@@ -6485,7 +6550,7 @@
       }
       if (siteEntry.kind === "shipyard") {
         if (type === "warship") score += enemySea * 3 + (MAPS[game.settings.map].sea ? 8 : 2) + Math.max(0, loadedTransports - ownWarships) * 4;
-        if (isTransportType(type)) score += (ownLand > ownSea * 2 ? 7 : 2) + (landStranded ? 22 : 0) + normalizeCargoTypes(cargoTypes).reduce((sum, cargoType) => sum + (cargoType === "engineer" ? 6 : typeMeta(cargoType).level * 2), 0);
+        if (isTransportType(type)) score += (ownLand > ownSea * 2 ? 7 : 2) + (landStranded ? 22 : 0) + normalizeCargoTypes2(cargoTypes).reduce((sum, cargoType) => sum + (cargoType === "engineer" ? 6 : typeMeta(cargoType).level * 2), 0);
       }
       return score;
     }
@@ -6512,19 +6577,19 @@
       while (produced < productionBudget) {
         const options = [];
         for (const siteEntry of game.sites.filter((entry) => entry.owner === owner && !getUnit2(entry.x, entry.y))) {
-          for (const type of buildableTypes(siteEntry)) {
+          for (const type of buildableTypes2(siteEntry)) {
             if (atUnitCap(owner, typeMeta(type).domain)) {
               continue;
             }
             const cargoTypes = isTransportType(type) ? chooseTransportCargo(owner, game.goldByOwner[owner], true) : [];
-            const totalCost = factionAdjustedCost(owner, type, cargoTypes);
+            const totalCost = factionAdjustedCost2(owner, type, cargoTypes);
             if (game.goldByOwner[owner] >= totalCost) {
               options.push({ siteEntry, type, cargoTypes, score: buildScore(owner, siteEntry, type, cargoTypes) });
             }
           }
         }
         options.sort((a, b) => b.score - a.score);
-        if (!options.length || !buildAtSite(owner, options[0].siteEntry, options[0].type, { cargoTypes: options[0].cargoTypes })) {
+        if (!options.length || !buildAtSite2(owner, options[0].siteEntry, options[0].type, { cargoTypes: options[0].cargoTypes })) {
           break;
         }
         produced += 1;
@@ -6622,7 +6687,7 @@
         return [];
       }
       const plans = preferEngineer ? [["engineer", "swordsman"], ["engineer", "crossbow"], ["engineer"], ["swordsman", "crossbow"], ["swordsman"]] : [["guard", "engineer"], ["swordsman", "crossbow"], ["engineer", "swordsman"], ["swordsman", "spearman"], ["engineer"], ["militia"]];
-      return plans.find((plan) => transportCost(plan) <= budget) || [];
+      return plans.find((plan) => transportCost2(plan) <= budget) || [];
     }
     function engineerBuildChoice(owner, engineer, intent) {
       const waterCells = engineerBuildCells(engineer);
@@ -6643,7 +6708,7 @@
       const ownedTransports = game.units.filter((unitEntry) => unitEntry.owner === owner && isTransportUnit(unitEntry)).length;
       const landWaiting = game.units.some((unitEntry) => unitEntry.owner === owner && typeMeta(unitEntry.type).domain === "land" && unitEntry.type !== "engineer" && !landUnitCanReachForeignCity2(unitEntry));
       const needFerry = !landFrontExists && enemyCities.length > 0 && landWaiting;
-      if (needFerry && ownedTransports < 2 && game.goldByOwner[owner] >= transportCost(["engineer"]) && !atUnitCap(owner, "sea")) {
+      if (needFerry && ownedTransports < 2 && game.goldByOwner[owner] >= transportCost2(["engineer"]) && !atUnitCap(owner, "sea")) {
         const cargoTypes = chooseTransportCargo(owner, game.goldByOwner[owner], true);
         const cell = waterCells.sort((a, b) => intent?.assaultSite ? dist(a, intent.assaultSite) - dist(b, intent.assaultSite) : 0)[0];
         if (cell) {
@@ -6654,7 +6719,7 @@
       if (enemySea && game.goldByOwner[owner] >= typeMeta("warship").cost) {
         return { kind: "warship", cell: waterCells[0], cargoTypes: [] };
       }
-      if ((teamNeedsEngineer(owner) || !hasTransport || intent?.assaultSite) && game.goldByOwner[owner] >= transportCost(["engineer"])) {
+      if ((teamNeedsEngineer(owner) || !hasTransport || intent?.assaultSite) && game.goldByOwner[owner] >= transportCost2(["engineer"])) {
         const cargoTypes = chooseTransportCargo(owner, game.goldByOwner[owner], true);
         const cell = waterCells.sort((a, b) => intent?.assaultSite ? dist(a, intent.assaultSite) - dist(b, intent.assaultSite) : 0)[0];
         if (cell) {
@@ -6702,10 +6767,10 @@
         if (built >= 2) {
           break;
         }
-        const types = buildableTypes(siteEntry);
+        const types = buildableTypes2(siteEntry);
         const landChoice = prefer.find((type) => types.includes(type) && game.goldByOwner[owner] >= typeMeta(type).cost);
         const choice = landChoice || (types.includes("warship") && game.goldByOwner[owner] >= typeMeta("warship").cost ? "warship" : null);
-        if (choice && buildAtSite(owner, siteEntry, choice)) {
+        if (choice && buildAtSite2(owner, siteEntry, choice)) {
           built += 1;
         }
       }
@@ -6792,7 +6857,7 @@
         if (built >= 2) {
           break;
         }
-        if (buildableTypes(siteEntry).includes("warship") && game.goldByOwner[owner] >= typeMeta("warship").cost && buildAtSite(owner, siteEntry, "warship")) {
+        if (buildableTypes2(siteEntry).includes("warship") && game.goldByOwner[owner] >= typeMeta("warship").cost && buildAtSite2(owner, siteEntry, "warship")) {
           built += 1;
         }
       }
@@ -6801,8 +6866,8 @@
         if (built >= 3) {
           break;
         }
-        const type = prefer.find((entry) => buildableTypes(siteEntry).includes(entry) && game.goldByOwner[owner] >= typeMeta(entry).cost);
-        if (type && buildAtSite(owner, siteEntry, type)) {
+        const type = prefer.find((entry) => buildableTypes2(siteEntry).includes(entry) && game.goldByOwner[owner] >= typeMeta(entry).cost);
+        if (type && buildAtSite2(owner, siteEntry, type)) {
           built += 1;
         }
       }
@@ -7515,8 +7580,8 @@
         if (!button2 || !siteEntry) {
           return;
         }
-        const cargoTypes = button2.isTransportUnit(dataset) ? normalizeCargoTypes(uiState.shipyardCargo) : [];
-        if (!buildAtSite("player", siteEntry, button2.dataset.type, { cargoTypes })) {
+        const cargoTypes = button2.isTransportUnit(dataset) ? normalizeCargoTypes2(uiState.shipyardCargo) : [];
+        if (!buildAtSite2("player", siteEntry, button2.dataset.type, { cargoTypes })) {
           toast(buildBudgetLeft2("player") <= 0 ? "本回合造兵已达上限。" : "无法在该据点生产该单位。");
         }
         refresh();
@@ -7580,7 +7645,7 @@
           kind: "engineer-launch",
           builderId: engineer.id,
           product: button2.dataset.engineerBuild,
-          cargoTypes: isTransportType(button2.dataset.engineerBuild) ? normalizeCargoTypes(uiState.engineerCargo, button2.dataset.engineerBuild) : []
+          cargoTypes: isTransportType(button2.dataset.engineerBuild) ? normalizeCargoTypes2(uiState.engineerCargo, button2.dataset.engineerBuild) : []
         };
         refresh();
       });
@@ -7662,7 +7727,7 @@
         game.freeplay = true;
         game.side = "player";
         for (const unitEntry of game.units.filter((entry) => areAllies2(entry.owner, "player"))) {
-          unitEntry.maxMove = effectiveMove(unitEntry);
+          unitEntry.maxMove = effectiveMove2(unitEntry);
           unitEntry.move = unitEntry.maxMove;
           unitEntry.acted = false;
           unitEntry.hasAttacked = false;
