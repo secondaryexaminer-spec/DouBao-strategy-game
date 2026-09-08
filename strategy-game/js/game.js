@@ -841,6 +841,79 @@
     return seen;
   }
 
+  // src/core/events.js
+  var handlers = /* @__PURE__ */ new Map();
+  var eventBus = {
+    on(eventName, handler) {
+      if (!handlers.has(eventName)) handlers.set(eventName, /* @__PURE__ */ new Set());
+      handlers.get(eventName).add(handler);
+      return () => this.off(eventName, handler);
+    },
+    off(eventName, handler) {
+      handlers.get(eventName)?.delete(handler);
+    },
+    emit(eventName, payload) {
+      const set = handlers.get(eventName);
+      if (!set || set.size === 0) return;
+      for (const handler of set) {
+        try {
+          handler(payload);
+        } catch (e) {
+          console.error(`[eventBus] ${eventName} handler error:`, e);
+        }
+      }
+    },
+    listenerCount(eventName) {
+      return handlers.get(eventName)?.size || 0;
+    }
+  };
+
+  // src/core/status.js
+  var statuses = /* @__PURE__ */ new Map();
+  var statusSystem = {
+    addStatus(unitId, key, turns, data = null) {
+      if (!statuses.has(unitId)) statuses.set(unitId, /* @__PURE__ */ new Map());
+      const existing = statuses.get(unitId).get(key);
+      if (existing) {
+        existing.turns = Math.max(existing.turns, turns);
+        if (data != null) existing.data = data;
+      } else {
+        statuses.get(unitId).set(key, { turns, data });
+      }
+    },
+    removeStatus(unitId, key) {
+      statuses.get(unitId)?.delete(key);
+    },
+    hasStatus(unitId, key) {
+      return !!statuses.get(unitId)?.has(key);
+    },
+    getStatus(unitId, key) {
+      const s = statuses.get(unitId)?.get(key);
+      return s ? { key, turns: s.turns, data: s.data } : null;
+    },
+    getAllStatuses(unitId) {
+      const map = statuses.get(unitId);
+      if (!map) return [];
+      return [...map.entries()].map(([key, s]) => ({ key, turns: s.turns, data: s.data }));
+    },
+    tickStatuses(aliveUnitIds) {
+      for (const [unitId, map] of statuses) {
+        if (!aliveUnitIds.includes(unitId)) {
+          statuses.delete(unitId);
+          continue;
+        }
+        for (const [key, s] of map) {
+          s.turns -= 1;
+          if (s.turns <= 0) map.delete(key);
+        }
+        if (map.size === 0) statuses.delete(unitId);
+      }
+    },
+    clear() {
+      statuses.clear();
+    }
+  };
+
   // src/core/turn.js
   function teamStandings(game, deps) {
     const { teamOf: teamOf2 } = deps;
@@ -1023,33 +1096,81 @@
       finish(true, "战场上只剩下你的组仍具战争能力。");
     }
   }
-
-  // src/core/events.js
-  var handlers = /* @__PURE__ */ new Map();
-  var eventBus = {
-    on(eventName, handler) {
-      if (!handlers.has(eventName)) handlers.set(eventName, /* @__PURE__ */ new Set());
-      handlers.get(eventName).add(handler);
-      return () => this.off(eventName, handler);
-    },
-    off(eventName, handler) {
-      handlers.get(eventName)?.delete(handler);
-    },
-    emit(eventName, payload) {
-      const set = handlers.get(eventName);
-      if (!set || set.size === 0) return;
-      for (const handler of set) {
-        try {
-          handler(payload);
-        } catch (e) {
-          console.error(`[eventBus] ${eventName} handler error:`, e);
+  function advanceTurn(game, deps) {
+    if (game.over) {
+      return;
+    }
+    game.currentIndex = (game.currentIndex + 1) % game.ownerOrder.length;
+    if (game.currentIndex === 0) {
+      game.turn += 1;
+      if (game.turn > MAX_TURNS && !game.freeplay && !game.over) {
+        resolveStalemate(game, deps);
+        if (game.over) {
+          return;
         }
       }
-    },
-    listenerCount(eventName) {
-      return handlers.get(eventName)?.size || 0;
     }
-  };
+    const endedOwner = game.ownerOrder[(game.currentIndex - 1 + game.ownerOrder.length) % game.ownerOrder.length];
+    eventBus.emit("turnEnd", { owner: endedOwner });
+    beginTurn(game, deps, game.ownerOrder[game.currentIndex], false);
+  }
+  function beginTurn(game, deps, owner, initial) {
+    const { ownerExists, decayFrontMemory, decayTemporarySites, healOwner: healOwner2, grantIncome: grantIncome2, aiRepair: aiRepair2, unit: unit2, getUnit: getUnit2, effectiveMove: effectiveMove2, refresh, aiTurn, fastSim } = deps;
+    if (game.over) {
+      return;
+    }
+    if (!ownerExists(owner)) {
+      advanceTurn(game, deps);
+      return;
+    }
+    game.side = owner;
+    game.buildsThisTurn = game.buildsThisTurn || {};
+    game.buildsThisTurn[owner] = 0;
+    statusSystem.tickStatuses(game.units.map((u) => u.id));
+    if (!initial) {
+      decayFrontMemory(owner);
+      decayTemporarySites(owner);
+      healOwner2(owner);
+      grantIncome2(owner);
+      aiRepair2(owner);
+      const ownerFac = owner === "player" ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+      if (ownerFac === "hre") {
+        for (const siteEntry of game.sites.filter((s) => s.kind === "city" && s.owner === owner)) {
+          if (!getUnit2(siteEntry.x, siteEntry.y)) {
+            game.units.push(unit2("militia", owner, siteEntry.x, siteEntry.y));
+          }
+        }
+      }
+      if (ownerFac === "ming" && game.turn % 3 === 0) {
+        for (const siteEntry of game.sites.filter((s) => (s.kind === "city" || s.kind === "barracks") && s.owner === owner)) {
+          if (!getUnit2(siteEntry.x, siteEntry.y)) {
+            game.units.push(unit2("militia", owner, siteEntry.x, siteEntry.y));
+          }
+        }
+      }
+    }
+    eventBus.emit("turnStart", { owner, initial });
+    for (const unitEntry of game.units.filter((entry) => entry.owner === owner)) {
+      unitEntry.maxMove = effectiveMove2(unitEntry);
+      unitEntry.move = unitEntry.maxMove;
+      unitEntry.acted = false;
+      unitEntry.hasAttacked = false;
+    }
+    if (owner !== "player") {
+      game.selected = null;
+    }
+    refresh();
+    if (!initial) {
+      checkEnd(game, deps);
+    }
+    if (owner !== "player" && !fastSim()) {
+      setTimeout(() => {
+        if (!game.over && game.side === owner) {
+          void aiTurn(owner);
+        }
+      }, 260);
+    }
+  }
 
   // src/core/economy.js
   function supportSites(game, deps, unitEntry) {
@@ -1311,52 +1432,6 @@
     eventBus.emit("productionCompleted", { owner, unit: created, site: siteEntry, kind: isTransportType(type) ? "ship" : "unit" });
     return true;
   }
-
-  // src/core/status.js
-  var statuses = /* @__PURE__ */ new Map();
-  var statusSystem = {
-    addStatus(unitId, key, turns, data = null) {
-      if (!statuses.has(unitId)) statuses.set(unitId, /* @__PURE__ */ new Map());
-      const existing = statuses.get(unitId).get(key);
-      if (existing) {
-        existing.turns = Math.max(existing.turns, turns);
-        if (data != null) existing.data = data;
-      } else {
-        statuses.get(unitId).set(key, { turns, data });
-      }
-    },
-    removeStatus(unitId, key) {
-      statuses.get(unitId)?.delete(key);
-    },
-    hasStatus(unitId, key) {
-      return !!statuses.get(unitId)?.has(key);
-    },
-    getStatus(unitId, key) {
-      const s = statuses.get(unitId)?.get(key);
-      return s ? { key, turns: s.turns, data: s.data } : null;
-    },
-    getAllStatuses(unitId) {
-      const map = statuses.get(unitId);
-      if (!map) return [];
-      return [...map.entries()].map(([key, s]) => ({ key, turns: s.turns, data: s.data }));
-    },
-    tickStatuses(aliveUnitIds) {
-      for (const [unitId, map] of statuses) {
-        if (!aliveUnitIds.includes(unitId)) {
-          statuses.delete(unitId);
-          continue;
-        }
-        for (const [key, s] of map) {
-          s.turns -= 1;
-          if (s.turns <= 0) map.delete(key);
-        }
-        if (map.size === 0) statuses.delete(unitId);
-      }
-    },
-    clear() {
-      statuses.clear();
-    }
-  };
 
   // src/core/decision.js
   var pending = /* @__PURE__ */ new Map();
@@ -4469,7 +4544,7 @@
       while (!game.over && game.turn <= cap && guard < guardMax) {
         const owner = game.side;
         if (!ownerExists(owner) || owner === "player") {
-          advanceTurn();
+          advanceTurn2();
         } else {
           await aiTurn(owner);
         }
@@ -5247,81 +5322,14 @@
       }
       expired.forEach((siteEntry) => log(`${siteEntry.name}补给耗尽，已自行拆除。`, "warning"));
     }
-    function beginTurn(owner, initial) {
-      if (game.over) {
-        return;
-      }
-      if (!ownerExists(owner)) {
-        advanceTurn();
-        return;
-      }
-      game.side = owner;
-      game.buildsThisTurn = game.buildsThisTurn || {};
-      game.buildsThisTurn[owner] = 0;
-      statusSystem.tickStatuses(game.units.map((u) => u.id));
-      if (!initial) {
-        decayFrontMemory(owner);
-        decayTemporarySites(owner);
-        healOwner2(owner);
-        grantIncome2(owner);
-        aiRepair2(owner);
-        const ownerFac = owner === "player" ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
-        if (ownerFac === "hre") {
-          for (const siteEntry of game.sites.filter((s) => s.kind === "city" && s.owner === owner)) {
-            if (!getUnit2(siteEntry.x, siteEntry.y)) {
-              game.units.push(unit2("militia", owner, siteEntry.x, siteEntry.y));
-            }
-          }
-        }
-        if (ownerFac === "ming" && game.turn % 3 === 0) {
-          for (const siteEntry of game.sites.filter((s) => (s.kind === "city" || s.kind === "barracks") && s.owner === owner)) {
-            if (!getUnit2(siteEntry.x, siteEntry.y)) {
-              game.units.push(unit2("militia", owner, siteEntry.x, siteEntry.y));
-            }
-          }
-        }
-      }
-      eventBus.emit("turnStart", { owner, initial });
-      for (const unitEntry of game.units.filter((entry) => entry.owner === owner)) {
-        unitEntry.maxMove = effectiveMove2(unitEntry);
-        unitEntry.move = unitEntry.maxMove;
-        unitEntry.acted = false;
-        unitEntry.hasAttacked = false;
-      }
-      if (owner !== "player") {
-        game.selected = null;
-      }
-      refresh();
-      if (!initial) {
-        checkEnd2();
-      }
-      if (owner !== "player" && !fastSim) {
-        setTimeout(() => {
-          if (!game.over && game.side === owner) {
-            void aiTurn(owner);
-          }
-        }, 260);
-      }
+    function beginTurn2(owner, initial) {
+      return beginTurn(game, turnFlowDeps, owner, initial);
     }
-    function advanceTurn() {
-      if (game.over) {
-        return;
-      }
-      game.currentIndex = (game.currentIndex + 1) % game.ownerOrder.length;
-      if (game.currentIndex === 0) {
-        game.turn += 1;
-        if (game.turn > MAX_TURNS && !game.freeplay && !game.over) {
-          resolveStalemate2();
-          if (game.over) {
-            return;
-          }
-        }
-      }
-      const endedOwner = game.ownerOrder[(game.currentIndex - 1 + game.ownerOrder.length) % game.ownerOrder.length];
-      eventBus.emit("turnEnd", { owner: endedOwner });
-      beginTurn(game.ownerOrder[game.currentIndex], false);
+    function advanceTurn2() {
+      return advanceTurn(game, turnFlowDeps);
     }
     const turnDeps = { teamOf: teamOf2, areAllies: areAllies2, teamName, typeMeta, isTransportUnit, cellKey, getSite: getSite2, adjacent8: adjacent82, isLandTile, finish };
+    const turnFlowDeps = { ...turnDeps, ownerExists, decayFrontMemory, decayTemporarySites, healOwner: healOwner2, grantIncome: grantIncome2, aiRepair: aiRepair2, unit: unit2, getUnit: getUnit2, effectiveMove: effectiveMove2, refresh, aiTurn, fastSim: () => fastSim };
     function teamStandings2() {
       return teamStandings(game, turnDeps);
     }
@@ -5858,7 +5866,7 @@
       }
       clearPendingOrder();
       game.selected = null;
-      advanceTurn();
+      advanceTurn2();
     }
     function collectLandCells() {
       const cells = [];
@@ -6796,7 +6804,7 @@
         await pause(aiStepDelay());
       }
       if (!game.over) {
-        advanceTurn();
+        advanceTurn2();
       }
     }
     function navalTryAttack(owner, unitEntry) {
@@ -6893,7 +6901,7 @@
         await pause(aiStepDelay());
       }
       if (!game.over) {
-        advanceTurn();
+        advanceTurn2();
       }
     }
     async function aiTurn(owner) {
@@ -7011,7 +7019,7 @@
         await pause(aiStepDelay());
       }
       if (!game.over) {
-        advanceTurn();
+        advanceTurn2();
       }
     }
     function newGame() {
@@ -7113,7 +7121,7 @@
       if (focusCity) {
         centerCamOn(focusCity.x, focusCity.y);
       }
-      const startFirstTurn = () => beginTurn(owners[0], true);
+      const startFirstTurn = () => beginTurn2(owners[0], true);
       if (fastSim) {
         startFirstTurn();
       } else {

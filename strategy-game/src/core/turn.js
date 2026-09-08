@@ -1,7 +1,11 @@
 'use strict';
 // src/core/turn.js —— 回合/胜负判定模块（从 main.js 闭包渐进抽取，行为零变化）。
 // 抽取原则：本模块不依赖 DOM；所有闭包辅助函数经 deps 注入，main.js 传原函数，
-// 保证与抽取前逐字节一致。抽取记录见 .vibecoding/MEMORY.md（阶段3后·拆分窗口第一刀）。
+// 保证与抽取前逐字节一致。抽取记录见 .vibecoding/MEMORY.md（阶段3后·拆分窗口第一刀+第四刀）。
+
+import { eventBus } from './events.js';
+import { statusSystem } from './status.js';
+import { MAX_TURNS } from './constants.js';
 
 // 阵营战绩汇总：按队伍统计 城市/据点/单位 数量
 export function teamStandings(game, deps) {
@@ -193,5 +197,94 @@ export function checkEnd(game, deps) {
   }
   if (activeTeams.size === 1 && activeTeams.has(playerTeam)) {
     finish(true, '战场上只剩下你的组仍具战争能力。');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 回合推进（拆分窗口第四刀；beginTurn/advanceTurn 互调，模块内完成）
+// ---------------------------------------------------------------------------
+
+// 回合切换：owner 轮转 → 回合递增 + 僵局判定 → turnEnd 事件 → 下一方 beginTurn
+export function advanceTurn(game, deps) {
+  if (game.over) {
+    return;
+  }
+  game.currentIndex = (game.currentIndex + 1) % game.ownerOrder.length;
+  if (game.currentIndex === 0) {
+    game.turn += 1;
+    if (game.turn > MAX_TURNS && !game.freeplay && !game.over) {
+      resolveStalemate(game, deps);
+      if (game.over) {
+        return;
+      }
+    }
+  }
+  const endedOwner = game.ownerOrder[(game.currentIndex - 1 + game.ownerOrder.length) % game.ownerOrder.length];
+  eventBus.emit('turnEnd', { owner: endedOwner });
+  beginTurn(game, deps, game.ownerOrder[game.currentIndex], false);
+}
+
+// 回合开始：状态衰减 → 经济/征召 → turnStart 事件 → 行动重置 → 渲染 → 终局检查 → AI 调度
+export function beginTurn(game, deps, owner, initial) {
+  const { ownerExists, decayFrontMemory, decayTemporarySites, healOwner, grantIncome, aiRepair, unit, getUnit, effectiveMove, refresh, aiTurn, fastSim } = deps;
+  if (game.over) {
+    return;
+  }
+  if (!ownerExists(owner)) {
+    advanceTurn(game, deps);
+    return;
+  }
+  game.side = owner;
+  game.buildsThisTurn = game.buildsThisTurn || {};
+  game.buildsThisTurn[owner] = 0;
+  // v0.2 GH-03：状态系统统一接线。每 beginTurn 开头衰减一次全量存活单位状态
+  // （死亡单位状态随之清理）；必须早于 turnStart emit（否则 HRE 每回合重建的
+  // frontline 会被紧随的 tick 立即清掉）。传全量 units 而非仅 owner，避免误删
+  // 其他 owner 存活单位的状态（status.js 对不在列表者执行删除）。
+  statusSystem.tickStatuses(game.units.map(u => u.id));
+  if (!initial) {
+    decayFrontMemory(owner);
+    decayTemporarySites(owner);
+    healOwner(owner);
+    grantIncome(owner);
+    aiRepair(owner);
+    // 征召兵：神罗联盟每个己方城市每回合免费产1个民兵（城市格无单位时）
+    const ownerFac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
+    if (ownerFac === 'hre') {
+      for (const siteEntry of game.sites.filter(s => s.kind === 'city' && s.owner === owner)) {
+        if (!getUnit(siteEntry.x, siteEntry.y)) {
+          game.units.push(unit('militia', owner, siteEntry.x, siteEntry.y));
+        }
+      }
+    }
+    // 卫所制：大明联盟每3回合每个己方城市/军营产1个民兵
+    if (ownerFac === 'ming' && game.turn % 3 === 0) {
+      for (const siteEntry of game.sites.filter(s => (s.kind === 'city' || s.kind === 'barracks') && s.owner === owner)) {
+        if (!getUnit(siteEntry.x, siteEntry.y)) {
+          game.units.push(unit('militia', owner, siteEntry.x, siteEntry.y));
+        }
+      }
+    }
+  }
+  eventBus.emit('turnStart', { owner, initial });
+  for (const unitEntry of game.units.filter(entry => entry.owner === owner)) {
+    unitEntry.maxMove = effectiveMove(unitEntry);
+    unitEntry.move = unitEntry.maxMove;
+    unitEntry.acted = false;
+    unitEntry.hasAttacked = false;
+  }
+  if (owner !== 'player') {
+    game.selected = null;
+  }
+  refresh();
+  if (!initial) {
+    checkEnd(game, deps);
+  }
+  if (owner !== 'player' && !fastSim()) {
+    setTimeout(() => {
+      if (!game.over && game.side === owner) {
+        void aiTurn(owner);
+      }
+    }, 260);
   }
 }

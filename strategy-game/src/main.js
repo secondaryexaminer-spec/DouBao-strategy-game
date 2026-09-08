@@ -1043,90 +1043,15 @@ import { mingSystem } from './factions/ming/mingRules.js';
     expired.forEach(siteEntry => log(`${siteEntry.name}补给耗尽，已自行拆除。`, 'warning'));
   }
 
-  function beginTurn(owner, initial) {
-    if (game.over) {
-      return;
-    }
-    if (!ownerExists(owner)) {
-      advanceTurn();
-      return;
-    }
-    game.side = owner;
-    game.buildsThisTurn = game.buildsThisTurn || {};
-    game.buildsThisTurn[owner] = 0;
-    // v0.2 GH-03：状态系统统一接线。每 beginTurn 开头衰减一次全量存活单位状态
-    // （死亡单位状态随之清理）；必须早于 turnStart emit（否则 HRE 每回合重建的
-    // frontline 会被紧随的 tick 立即清掉）。传全量 units 而非仅 owner，避免误删
-    // 其他 owner 存活单位的状态（status.js 对不在列表者执行删除）。
-    statusSystem.tickStatuses(game.units.map(u => u.id));
-    if (!initial) {
-      decayFrontMemory(owner);
-      decayTemporarySites(owner);
-      healOwner(owner);
-      grantIncome(owner);
-      aiRepair(owner);
-      // 征召兵：神罗联盟每个己方城市每回合免费产1个民兵（城市格无单位时）
-      const ownerFac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
-      if (ownerFac === 'hre') {
-        for (const siteEntry of game.sites.filter(s => s.kind === 'city' && s.owner === owner)) {
-          if (!getUnit(siteEntry.x, siteEntry.y)) {
-            game.units.push(unit('militia', owner, siteEntry.x, siteEntry.y));
-          }
-        }
-      }
-      // 卫所制：大明联盟每3回合每个己方城市/军营产1个民兵
-      if (ownerFac === 'ming' && game.turn % 3 === 0) {
-        for (const siteEntry of game.sites.filter(s => (s.kind === 'city' || s.kind === 'barracks') && s.owner === owner)) {
-          if (!getUnit(siteEntry.x, siteEntry.y)) {
-            game.units.push(unit('militia', owner, siteEntry.x, siteEntry.y));
-          }
-        }
-      }
-    }
-    eventBus.emit('turnStart', { owner, initial });
-    for (const unitEntry of game.units.filter(entry => entry.owner === owner)) {
-      unitEntry.maxMove = effectiveMove(unitEntry);
-      unitEntry.move = unitEntry.maxMove;
-      unitEntry.acted = false;
-      unitEntry.hasAttacked = false;
-    }
-    if (owner !== 'player') {
-      game.selected = null;
-    }
-    refresh();
-    if (!initial) {
-      checkEnd();
-    }
-    if (owner !== 'player' && !fastSim) {
-      setTimeout(() => {
-        if (!game.over && game.side === owner) {
-          void aiTurn(owner);
-        }
-      }, 260);
-    }
-  }
+  // 回合推进（抽取至 src/core/turn.js，行为零变化；turnFlowDeps 见胜负判定子组处定义）
+  function beginTurn(owner, initial) { return turn.beginTurn(game, turnFlowDeps, owner, initial); }
 
-  function advanceTurn() {
-    if (game.over) {
-      return;
-    }
-    game.currentIndex = (game.currentIndex + 1) % game.ownerOrder.length;
-    if (game.currentIndex === 0) {
-      game.turn += 1;
-      if (game.turn > MAX_TURNS && !game.freeplay && !game.over) {
-        resolveStalemate();
-        if (game.over) {
-          return;
-        }
-      }
-    }
-    const endedOwner = game.ownerOrder[(game.currentIndex - 1 + game.ownerOrder.length) % game.ownerOrder.length];
-    eventBus.emit('turnEnd', { owner: endedOwner });
-    beginTurn(game.ownerOrder[game.currentIndex], false);
-  }
+  function advanceTurn() { return turn.advanceTurn(game, turnFlowDeps); }
 
   // ---- 胜负判定子组（抽取至 src/core/turn.js，行为零变化；依赖经 turnDeps 注入原函数）----
   const turnDeps = { teamOf, areAllies, teamName, typeMeta, isTransportUnit, cellKey, getSite, adjacent8, isLandTile, finish };
+  // 回合推进 deps（= 胜负判定 deps + 流程闭包；fastSim 动态读取）
+  const turnFlowDeps = { ...turnDeps, ownerExists, decayFrontMemory, decayTemporarySites, healOwner, grantIncome, aiRepair, unit, getUnit, effectiveMove, refresh, aiTurn, fastSim: () => fastSim };
 
   function teamStandings() { return turn.teamStandings(game, turnDeps); }
 
