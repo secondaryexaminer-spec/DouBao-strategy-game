@@ -7,7 +7,8 @@ import { typeMeta, siteMeta, clamp, rnd, diagonalDist, inUnitRange } from './uti
 import { areAllies, areEnemies } from './teams.js';
 
 // 攻城器械：对据点驻军额外伤害（规格书"投石车=攻城"定位 + 兵种描述；阶段4 补齐）
-const SIEGE_DAMAGE = { catapult: 2, heavyCatapult: 3, siegeCrossbow: 2, nomadChariot: 2, nomadCannon: 2 };
+// hongyiCannon：红夷大炮"超远程攻城"（16世纪攻城炮定位，与重型投石车同级）
+const SIEGE_DAMAGE = { catapult: 2, heavyCatapult: 3, siegeCrossbow: 2, nomadChariot: 2, nomadCannon: 2, hongyiCannon: 3 };
 
 export function getSite(game, x, y) {
   return game.sites.find(entry => entry.x === x && entry.y === y) || null;

@@ -109,9 +109,12 @@ export function siteBonusFor(ctx, attacker, defender) {
 }
 
 // ---------------------------------------------------------------------------
-// afterAttack：掠袭收益 + raided 标记
+// afterAttack：打完就跑 + 掠袭收益 + raided 标记
 // ---------------------------------------------------------------------------
 // 触发条件：金帐单位攻击敌方单位（攻击站据点的单位视为袭击据点）。
+//  - 打完就跑（联盟机制，总览 §）：攻击后移动力保留 max(1, floor(maxMove×0.5))。
+//    main.js 攻击后 attacker.move=0，这里恢复 50% 实现"骑射游击、打完就跑"；
+//    蓝帐伏击（nationMechanics.onAfterAttack 后执行）会覆盖为满移动力（更彻底）。
 //  - defenderDead=false → 不给金币，打上 raided 标记（第一刀制造破绽）。
 //  - defenderDead=true  → 按目标类型 + raidPower + 据点加成结算战利品；
 //                         若目标带 raided 标记，战利品翻倍。
@@ -120,6 +123,7 @@ export function onAfterAttack(ctx, payload) {
   if (!attacker || !defender) return;
   if (!isGoldenHordeUnit(ctx, attacker)) return;
   if (ctx.areAllies(ctx.game.teams, attacker.owner, defender.owner)) return;
+  attacker.move = Math.max(1, Math.floor(attacker.maxMove * 0.5));
 
   if (!defenderDead) {
     // 第一刀：制造破绽，不给金币

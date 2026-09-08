@@ -69,7 +69,7 @@ export const TYPES = {
   pikeSquare: { name: '长矛方阵', icon: '🔱', level: 1, hp: 14, atk: 5, def: 6, move: 3, range: 1, cost: 30, domain: 'land', faction: 'hre', text: '不可被冲锋的密集方阵。', bonusVs: { cavalry: 5 } },
   imperialCrossbow: { name: '帝国弩手', icon: '🏹', level: 2, hp: 10, atk: 8, def: 2, move: 2, range: 2, cost: 42, domain: 'land', faction: 'hre', text: '高爆发集火。' },
   imperialGuard: { name: '帝国近卫军', icon: '💂', level: 3, hp: 22, atk: 8, def: 7, move: 3, range: 1, cost: 56, domain: 'land', faction: 'hre', text: '守点时防御+3。' },
-  siegeTower: { name: '攻城塔', icon: '🏰', level: 2, hp: 30, atk: 4, def: 3, move: 1, range: 1, cost: 40, domain: 'land', faction: 'hre', text: '占领据点速度×2。' },
+  siegeTower: { name: '攻城塔', icon: '🏰', level: 2, hp: 30, atk: 4, def: 3, move: 1, range: 1, cost: 40, domain: 'land', faction: 'hre', text: '占领据点后返还全部移动力。' },
   heavyCatapult: { name: '重型投石车', icon: '💥', level: 3, hp: 8, atk: 14, def: 1, move: 1, range: 4, cost: 58, domain: 'land', faction: 'hre', text: '对据点驻军伤害+3。' },
   // === 神罗国家特色兵种 ===
   austrianKnight: { name: '奥地利骑士', icon: '🏇', level: 3, hp: 20, atk: 9, def: 6, move: 5, range: 1, cost: 50, domain: 'land', faction: 'hre', nation: 'austria', text: '重装冲锋骑兵。', charge: 3 },
@@ -107,10 +107,10 @@ export const TYPES = {
   // === 马穆鲁克国家特色兵种 ===
   sultanGuard: { name: '苏丹禁卫军', icon: '👑', level: 3, hp: 22, atk: 11, def: 7, move: 5, range: 1, cost: 62, domain: 'land', faction: 'mamluk', nation: 'egypt', text: '超精锐骑兵，击杀后回血3', charge: 3 },
   syrianLongbow: { name: '叙利亚长弓手', icon: '🌙', level: 3, hp: 10, atk: 9, def: 2, move: 2, range: 3, cost: 46, domain: 'land', faction: 'mamluk', nation: 'syria', text: '联盟最远陆军' },
-  caliphScholar: { name: '哈里发学者', icon: '📜', level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: 'land', faction: 'mamluk', nation: 'baghdad', text: '光环单位，周围2格友军攻防+1' },
+  caliphScholar: { name: '哈里发学者', icon: '📜', level: 2, hp: 8, atk: 1, def: 1, move: 2, range: 1, cost: 40, domain: 'land', faction: 'mamluk', nation: 'baghdad', text: '光环单位，周围2格友军攻防+1（巴格达3格）。' },
   // === 大明帝国（ming）联盟专属兵种 ===
   shenjiBattalion: { name: '神机营火枪兵', icon: '🎇', level: 3, hp: 8, atk: 9, def: 1, move: 2, range: 3, cost: 48, domain: 'land', faction: 'ming', text: '火器齐射，攻击溅射50%到周围1格（大明本部60%）。' },
-  qiArmy: { name: '戚家军', icon: '🥋', level: 2, hp: 16, atk: 7, def: 6, move: 3, range: 1, cost: 44, domain: 'land', faction: 'ming', text: '高防步兵，鸳鸯阵', bonusVs: { cavalry: 3 } },
+  qiArmy: { name: '戚家军', icon: '🥋', level: 2, hp: 16, atk: 7, def: 6, move: 3, range: 1, cost: 44, domain: 'land', faction: 'ming', text: '高防步兵，鸳鸯阵克制骑兵。', bonusVs: { cavalry: 3 } },
   mingCavalry: { name: '大明骑兵', icon: '🐅', level: 3, hp: 16, atk: 8, def: 4, move: 5, range: 1, cost: 46, domain: 'land', faction: 'ming', text: '通用机动打击', charge: 2 },
   worksEngineer: { name: '工部工程师', icon: '🏗️', level: 2, hp: 12, atk: 3, def: 2, move: 3, range: 1, cost: 46, domain: 'land', faction: 'ming', builder: true, text: '大明工程师，可造船与建营并部署工程设施（大明本部费用-10%）。' },
   treasureShip: { name: '宝船', icon: '🐉', level: 3, hp: 30, atk: 4, def: 5, move: 3, range: 1, cost: 60, domain: 'sea', faction: 'ming', transport: 10, text: '巨型运输船，可运10个陆军' },
