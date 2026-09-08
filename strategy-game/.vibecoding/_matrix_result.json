@@ -1,0 +1,119 @@
+[
+  {
+    "pair": "hre vs goldenHorde",
+    "winA": 9,
+    "winB": 9,
+    "share": 50,
+    "avgA": {
+      "k": 23.8,
+      "l": 73,
+      "lvl3": 0.4,
+      "prod": 11.5,
+      "raid": 0
+    }
+  },
+  {
+    "pair": "hre vs venice",
+    "winA": 9,
+    "winB": 9,
+    "share": 50,
+    "avgA": {
+      "k": 26.7,
+      "l": 62.7,
+      "lvl3": 0.5,
+      "prod": 4.8,
+      "raid": 0
+    }
+  },
+  {
+    "pair": "hre vs mamluk",
+    "winA": 6,
+    "winB": 12,
+    "share": 33,
+    "avgA": {
+      "k": 17,
+      "l": 41.2,
+      "lvl3": 0.3,
+      "prod": 7.9,
+      "raid": 0
+    }
+  },
+  {
+    "pair": "hre vs ming",
+    "winA": 10,
+    "winB": 8,
+    "share": 56,
+    "avgA": {
+      "k": 22.3,
+      "l": 88.9,
+      "lvl3": 0.6,
+      "prod": 13.5,
+      "raid": 0
+    }
+  },
+  {
+    "pair": "goldenHorde vs venice",
+    "winA": 10,
+    "winB": 8,
+    "share": 56,
+    "avgA": {
+      "k": 59.9,
+      "l": 44,
+      "lvl3": 17.5,
+      "prod": 68.4,
+      "raid": 426.1
+    }
+  },
+  {
+    "pair": "goldenHorde vs mamluk",
+    "winA": 9,
+    "winB": 9,
+    "share": 50,
+    "avgA": {
+      "k": 38.9,
+      "l": 23,
+      "lvl3": 27,
+      "prod": 63.1,
+      "raid": 300.7
+    }
+  },
+  {
+    "pair": "venice vs mamluk",
+    "winA": 9,
+    "winB": 9,
+    "share": 50,
+    "avgA": {
+      "k": 38.7,
+      "l": 37.3,
+      "lvl3": 17.4,
+      "prod": 65.6,
+      "raid": 0
+    }
+  },
+  {
+    "pair": "venice vs ming",
+    "winA": 9,
+    "winB": 9,
+    "share": 50,
+    "avgA": {
+      "k": 26.9,
+      "l": 63.2,
+      "lvl3": 17.3,
+      "prod": 86.6,
+      "raid": 0
+    }
+  },
+  {
+    "pair": "mamluk vs ming",
+    "winA": 10,
+    "winB": 8,
+    "share": 56,
+    "avgA": {
+      "k": 24.4,
+      "l": 43.9,
+      "lvl3": 21.4,
+      "prod": 71.8,
+      "raid": 0
+    }
+  }
+]

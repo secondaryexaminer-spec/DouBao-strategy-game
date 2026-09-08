@@ -94,3 +94,8 @@
 - **2026-09-08 · producedByType 埋点缺口**：AI 生产主路径是 factory.js buildAtSite（不是 main.js 的工程师海边路径）——incrementStatByType 只加在 main.js 两处导致 AI 生产不进桶（lostByType 有数据、producedByType 空）。**教训：核心抽取模块（factory/economy/turn）的统计/日志埋点必须在抽取后的模块里补，main.js 的薄包装/旧路径覆盖不全**。已补：factory.js buildAtSite 解构 incrementStatByType（可选调用）+ factoryDeps 注入。
 - **2026-09-08 · 壕沟减冲锋 = min(chargeVal,2)**：HRE 壕沟"冲锋-2"是减攻击方 charge 值（charge2→减2）。mingCavalry charge 改 1 后 G6 测试期望 6→实际 7。**产品逻辑正确（按 charge 值减），修正测试场景**：G6 攻击方 mingCavalry→cavalry（charge2）保持测试意图。教训：改数值后 harness 期望若因产品逻辑自然变化而失败，先确认是产品 bug 还是测试场景过时。
 - **2026-09-08 · 金帐 vs 大明对调平衡结果**：对调 ×3 seed 后金帐总胜率 10/18≈56%（接近五五开，此前单侧 C 全胜是位置偏差）——差异化后金帐从"被明碾压"到平衡。金帐 raid 收入 425~1437/局（掠袭经济支柱生效）；khanGuard produced 200/局、损失 60~90/局（量换质画像仍在但胜率已平衡）。
+
+- **2026-09-08 · diff-gap 真相大白（阶段6 前置诊断）**：suite diff-gap 测试=strait 图冷酷在 B 侧、简单在 C 侧；而 strait 图 C 侧位置优势约 8:1。对调验证：冷酷放 C 侧胜率 88%（14:2），放 B 侧（原测试）50%——**位置优势≈难度优势，diff 难度实际生效，diff-gap 50% 是测试设计被位置偏差污染，不是 AI 难度问题**。阶段6 要改的是测试（对调取平均、期望改冷酷平均≥60%），真正的 AI 改良是策略层面（新兵种针对性等）。
+- **2026-09-08 · 阶段5 平衡矩阵完整结果（10 组对调 ×3 seeds）**：9/10 组 44-56% 平衡 ✅；唯一红旗 **hre vs mamluk 37%（90 局样本）**——根因非数值：fortification.js L304 注释确认 **HRE AI 建造未实现（仅人类玩家，阶段6 接入）**，sim 里 HRE 是裸板（无工事+lvl3 0.4/局）打马穆鲁克精兵（lvl3 21.4/局）。**处置：不调数值，登记待办阶段6 完成后复测**。hre 对金帐/威尼斯/大明 50-56% 佐证基础数值不弱。
+- **2026-09-08 · diff-gap 测试修正完成（sim/suite.js）**：改为正反对调各半、冷酷平均胜率≥60%；完整 suite **4/4 全过**（原 3/4）。**教训：sim 的 wins 键是团队字母 B/C（ai0→B、ai1→C），不是 ai0/ai1**——聚合脚本两次踩坑；另外**sim/suite.js 是 CRLF 行尾**，node 字符串替换必须转 CRLF 否则不匹配。
+- **2026-09-08 · 环境故障恢复记录**：Read/Edit/Bash 曾全部失败（cua_agent_instance_acquire_failed / sandbox not prepared）——重启豆包客户端后恢复。期间 Edit 工具 native 层故障，用 node 临时脚本做字符串替换绕过。教训：**Edit 不可用时 node 脚本替换是稳定通道；含中文/多行替换用临时 .js 文件执行**。

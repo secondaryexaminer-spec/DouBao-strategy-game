@@ -58,11 +58,17 @@ const SCENARIOS = [
   },
   {
     id: 'diff-gap',
-    desc: '裂海海峡 · ai0冷酷(B) vs ai1简单(C) → 冷酷方应占多数',
+    desc: '裂海海峡 · 冷酷 vs 简单（正反对调取平均）→ 冷酷平均胜率应 ≥60%',
     config: { mapSelect: 'strait', aiSelect: '2', diff: ['brutal', 'easy'], agg: 'balanced' },
-    expect: agg => {
-      const share = teamShare(agg.wins, 'B');
-      return { pass: share >= 0.6, metric: `冷酷(B)胜率 ${(share * 100).toFixed(0)}%`, want: '≥60%' };
+    expect: async (agg, harness) => {
+      // 冷酷在 B 侧（ai0=brutal）
+      const brutalB = teamShare(agg.wins, 'B');
+      // 对调：冷酷在 C 侧（ai0=easy, ai1=brutal），消除 strait 图 C 侧位置偏差
+      harness.setConfig(baseConfig({ mapSelect: 'strait', aiSelect: '2', diff: ['easy', 'brutal'], agg: 'balanced' }));
+      const { agg: swappedAgg } = await harness.debug.batch(CAP, ROUNDS, SEED + 1000);
+      const brutalC = teamShare(swappedAgg.wins, 'C');
+      const avg = (brutalB + brutalC) / 2;
+      return { pass: avg >= 0.6, metric: `冷酷平均胜率 ${(avg * 100).toFixed(0)}% (B侧${(brutalB * 100).toFixed(0)}% / C侧${(brutalC * 100).toFixed(0)}%)`, want: '平均≥60%' };
     }
   },
   {
@@ -88,7 +94,7 @@ async function main() {
     harness.setConfig(baseConfig(scn.config));
     const t0 = Date.now();
     const { agg } = await harness.debug.batch(CAP, ROUNDS, SEED);
-    const verdict = scn.expect(agg);
+    const verdict = await scn.expect(agg, harness);
     if (!verdict.pass) failures += 1;
     const row = {
       id: scn.id,
