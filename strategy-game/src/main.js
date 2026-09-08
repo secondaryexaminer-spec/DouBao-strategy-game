@@ -18,6 +18,7 @@ import { siteBonus, matchupBonus, computeDamage, previewCombat, canAttack } from
 import { createRng } from './core/rng.js';
 import { reachable } from './core/movement.js';
 import * as turn from './core/turn.js';
+import * as economy from './core/economy.js';
 import { eventBus } from './core/events.js';
 import { statusSystem } from './core/status.js';
 import { facilitySystem } from './core/facility.js';
@@ -1114,9 +1115,14 @@ import { mingSystem } from './factions/ming/mingRules.js';
     return unloadTransport(transport, cells[0].x, cells[0].y);
   }
 
-  function supportSites(unitEntry) {
-    return game.sites.filter(siteEntry => areAllies(siteEntry.owner, unitEntry.owner) && ((((siteEntry.kind === 'city' || siteEntry.kind === 'camp' || siteEntry.kind === 'barracksSmall' || siteEntry.kind === 'barracksLarge') && typeMeta(unitEntry.type).domain === 'land')) || ((siteEntry.kind === 'shipyard' || siteEntry.kind === 'fortress') && typeMeta(unitEntry.type).domain === 'sea')));
-  }
+  // ---- 收入/据点经济（抽取至 src/core/economy.js，行为零变化；依赖经 economyDeps 注入原函数）----
+  const economyDeps = { areAllies, tierName, ownerName, log, getUnit, healMultiplier };
+
+  function supportSites(unitEntry) { return economy.supportSites(game, economyDeps, unitEntry); }
+
+  function healOwner(owner) { return economy.healOwner(game, economyDeps, owner); }
+
+  function grantIncome(owner) { return economy.grantIncome(game, economyDeps, owner); }
 
   function decayTemporarySites(owner) {
     const expired = [];
@@ -1137,42 +1143,6 @@ import { mingSystem } from './factions/ming/mingRules.js';
       game.selected = null;
     }
     expired.forEach(siteEntry => log(`${siteEntry.name}补给耗尽，已自行拆除。`, 'warning'));
-  }
-
-  function healOwner(owner) {
-    for (const unitEntry of game.units.filter(entry => entry.owner === owner)) {
-      const supports = supportSites(unitEntry);
-      if (!supports.length) {
-        unitEntry.lastAttacked = false;
-        continue;
-      }
-      const nearest = Math.min(...supports.map(siteEntry => dist(siteEntry, unitEntry)));
-      if (!unitEntry.lastAttacked) {
-        const ratio = (nearest === 0 ? 0.16 : nearest <= 1 ? 0.1 : nearest >= 14 ? 0.02 : Math.max(0.02, 0.1 - (nearest - 1) * 0.08 / 13)) * healMultiplier(unitEntry);
-        const healNat = unitEntry.owner === 'player' ? game.settings?.nation : game.aiProfiles?.[unitEntry.owner]?.nation;
-        const bavariaBonus = healNat === 'bavaria' ? 1 : 0;
-        unitEntry.hp = Math.min(unitEntry.maxHp, unitEntry.hp + Math.max(1, Math.ceil(unitEntry.maxHp * ratio)) + bavariaBonus);
-      }
-      unitEntry.lastAttacked = false;
-    }
-  }
-
-  function grantIncome(owner) {
-    const base = game.sites.filter(entry => entry.owner === owner).reduce((sum, entry) => sum + entry.income, 0);
-    const incFac = owner === 'player' ? game.settings?.faction : game.aiProfiles?.[owner]?.faction;
-    const incNation = owner === 'player' ? game.settings?.nation : game.aiProfiles?.[owner]?.nation;
-    const factionMult = incFac === 'venice' ? 1.25 : 1;
-    // 国家机制：收入加成（加法叠加，避免威尼斯过强）
-    let nationIncomeBonus = 0;
-    if (incNation === 'austria' || incNation === 'egypt') nationIncomeBonus += game.sites.filter(s => s.kind === 'city' && s.owner === owner).length * 2;
-    if (incNation === 'genoa') nationIncomeBonus += Math.round(base * 0.1);
-    const gain = Math.round(base * (game.settings?.incomeMult || 1) * factionMult) + nationIncomeBonus;
-    const incomePayload = { owner, amount: gain };
-    eventBus.emit('incomeCalculated', incomePayload);
-    game.goldByOwner[owner] += incomePayload.amount;
-    if (gain > 0) {
-      log(`${ownerName(owner)}获得 ${gain} 金币收入。`, 'gold');
-    }
   }
 
   function beginTurn(owner, initial) {
@@ -1332,18 +1302,11 @@ import { mingSystem } from './factions/ming/mingRules.js';
     });
   }
 
-  function siteUpgradeCost(siteEntry) {
-    return siteMeta(siteEntry.kind).upgradeCosts[siteEntry.tier] || 0;
-  }
+  function siteUpgradeCost(siteEntry) { return economy.siteUpgradeCost(game, economyDeps, siteEntry); }
 
-  function buildBudgetLeft(owner) {
-    return (game.settings?.buildCap ?? 100) - (game.buildsThisTurn?.[owner] || 0);
-  }
+  function buildBudgetLeft(owner) { return economy.buildBudgetLeft(game, economyDeps, owner); }
 
-  function recordBuild(owner, count) {
-    game.buildsThisTurn = game.buildsThisTurn || {};
-    game.buildsThisTurn[owner] = (game.buildsThisTurn[owner] || 0) + count;
-  }
+  function recordBuild(owner, count) { return economy.recordBuild(game, economyDeps, owner, count); }
 
   function buildAtSite(owner, siteEntry, type, options = {}) {
     const cargoTypes = isTransportType(type) ? normalizeCargoTypes(options.cargoTypes) : [];
@@ -1375,44 +1338,11 @@ import { mingSystem } from './factions/ming/mingRules.js';
     return true;
   }
 
-  function upgradeSite(owner, siteEntry) {
-    const cost = siteUpgradeCost(siteEntry);
-    if (!siteEntry || siteEntry.owner !== owner || siteEntry.tier >= siteMeta(siteEntry.kind).maxTier || game.goldByOwner[owner] < cost) {
-      return false;
-    }
-    game.goldByOwner[owner] -= cost;
-    siteEntry.tier += 1;
-    siteEntry.income += siteEntry.kind === 'city' ? 3 : 2;
-    log(`${siteEntry.name}升级为${tierName(siteEntry.tier)}${siteMeta(siteEntry.kind).name}。`, 'system');
-    return true;
-  }
+  function upgradeSite(owner, siteEntry) { return economy.upgradeSite(game, economyDeps, owner, siteEntry); }
 
-  function fullHealSite(owner, siteEntry) {
-    const occupant = getUnit(siteEntry.x, siteEntry.y);
-    const cost = siteEntry.kind === 'city' || siteEntry.kind === 'camp' ? 5 : siteEntry.kind === 'shipyard' ? 6 : 7;
-    if (!siteEntry || siteEntry.owner !== owner || !occupant || occupant.owner !== owner || game.goldByOwner[owner] < cost) {
-      return false;
-    }
-    game.goldByOwner[owner] -= cost;
-    occupant.hp = occupant.maxHp;
-    log(`${siteEntry.name}花费${cost}金币完成驻军修整。`, 'gold');
-    return true;
-  }
+  function fullHealSite(owner, siteEntry) { return economy.fullHealSite(game, economyDeps, owner, siteEntry); }
 
-  function aiRepair(owner) {
-    for (const siteEntry of game.sites.filter(entry => entry.owner === owner)) {
-      const occupant = getUnit(siteEntry.x, siteEntry.y);
-      if (!occupant || occupant.owner !== owner || occupant.hp >= occupant.maxHp) {
-        continue;
-      }
-      const cost = siteEntry.kind === 'city' || siteEntry.kind === 'camp' ? 5 : siteEntry.kind === 'shipyard' ? 6 : 7;
-      if (occupant.hp <= occupant.maxHp * 0.45 && game.goldByOwner[owner] >= cost) {
-        game.goldByOwner[owner] -= cost;
-        occupant.hp = occupant.maxHp;
-        log(`${ownerName(owner)}在${siteEntry.name}完成驻军修整。`, 'system');
-      }
-    }
-  }
+  function aiRepair(owner) { return economy.aiRepair(game, economyDeps, owner); }
 
   function consumeAction(unitEntry) {
     unitEntry.move = 0;
